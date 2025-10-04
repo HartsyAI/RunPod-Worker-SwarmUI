@@ -1,0 +1,60 @@
+# RunPod Ignore File
+# Exclude unnecessary files from Docker build context
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+docs/
+SETUP.md
+ARCHITECTURE.md
+CONTRIBUTING.md
+
+# Development
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+test_*.py
+tests/
+__pycache__/
+*.pyc
+*.pyo
+
+# CI/CD
+.github/
+
+# Docker
+docker-compose*.yml
+.dockerignore
+Dockerfile.dev
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+tmp/
+temp/
+*.tmp
+
+# Large files that should come from network volume
+Models/
+Output/
+dlbackend/ComfyUI/
