@@ -1,0 +1,17 @@
+{
+  "input": {
+    "endpoint": "/API/GenerateText2Image",
+    "method": "POST",
+    "data": {
+      "prompt": "a beautiful mountain landscape at sunrise, ultra detailed, cinematic lighting",
+      "negative_prompt": "low quality, blurry, distorted, text, watermark",
+      "model": "OfficialStableDiffusion/sd_xl_base_1.0",
+      "width": 1024,
+      "height": 1024,
+      "steps": 30,
+      "cfg_scale": 7.5,
+      "seed": -1,
+      "images": 1
+    }
+  }
+}

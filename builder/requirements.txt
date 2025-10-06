@@ -1,0 +1,7 @@
+# SwarmUI RunPod Serverless - Python Dependencies
+
+# RunPod SDK (required for serverless handler)
+runpod>=1.6.2
+
+# HTTP requests with retry session
+requests>=2.31.0
