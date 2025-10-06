@@ -3,5 +3,6 @@
 # RunPod SDK (required for serverless handler)
 runpod>=1.6.2
 
-# HTTP requests with retry session
+# HTTP requests with retry capabilities
 requests>=2.31.0
+urllib3>=2.0.0

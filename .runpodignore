@@ -6,13 +6,13 @@
 .gitignore
 .gitattributes
 
-# Documentation
+# GitHub
+.github/
+
+# Documentation (keep only README.md)
 *.md
 !README.md
 docs/
-SETUP.md
-ARCHITECTURE.md
-CONTRIBUTING.md
 
 # Development
 .vscode/
@@ -22,24 +22,16 @@ CONTRIBUTING.md
 *~
 
 # Testing
-test_*.py
-tests/
+tests/test_*.py
 __pycache__/
 *.pyc
 *.pyo
-
-# CI/CD
-.github/
-
-# Docker
-docker-compose*.yml
-.dockerignore
-Dockerfile.dev
 
 # Environment
 .env
 .env.local
 .env.*.local
+.env.example
 
 # Logs
 *.log
@@ -54,7 +46,20 @@ tmp/
 temp/
 *.tmp
 
-# Large files that should come from network volume
+# Output from testing
+output/
+
+# Large files that come from network volume
 Models/
+models/
 Output/
-dlbackend/ComfyUI/
+SwarmUI/
+dlbackend/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+
+# Docker
+docker-compose*.yml
+.dockerignore

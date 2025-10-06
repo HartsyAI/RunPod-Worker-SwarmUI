@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Test script for SwarmUI RunPod Serverless Endpoint
+"""Test script for SwarmUI RunPod Serverless Endpoint.
 
 Usage:
     python test_endpoint.py --endpoint YOUR_ENDPOINT_ID --api-key YOUR_API_KEY
@@ -12,16 +11,19 @@ import json
 import time
 import base64
 from pathlib import Path
+from typing import Dict, Any, Optional
 
 
-def test_runsync(endpoint_id, api_key, prompt=None):
-    """
-    Test the /runsync endpoint (synchronous, waits for completion).
+def test_runsync(endpoint_id: str, api_key: str, prompt: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Test the /runsync endpoint (synchronous, waits for completion).
     
     Args:
         endpoint_id: RunPod endpoint ID
         api_key: RunPod API key
         prompt: Custom prompt (optional)
+        
+    Returns:
+        dict: Result data or None if failed
     """
     url = f"https://api.runpod.ai/v2/{endpoint_id}/runsync"
     
@@ -52,7 +54,7 @@ def test_runsync(endpoint_id, api_key, prompt=None):
     print(f"URL: {url}")
     print(f"Prompt: {payload['input']['prompt']}")
     print("=" * 80)
-    print("\nSending request (this may take 30-90 seconds for cold start)...")
+    print("\nSending request (this may take 60-90 seconds for cold start)...")
     
     try:
         start_time = time.time()
@@ -87,14 +89,16 @@ def test_runsync(endpoint_id, api_key, prompt=None):
         return None
 
 
-def test_run_async(endpoint_id, api_key, prompt=None):
-    """
-    Test the /run endpoint (asynchronous, returns job ID immediately).
+def test_run_async(endpoint_id: str, api_key: str, prompt: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Test the /run endpoint (asynchronous, returns job ID immediately).
     
     Args:
         endpoint_id: RunPod endpoint ID
         api_key: RunPod API key
         prompt: Custom prompt (optional)
+        
+    Returns:
+        dict: Result data or None if failed
     """
     run_url = f"https://api.runpod.ai/v2/{endpoint_id}/run"
     
@@ -183,9 +187,8 @@ def test_run_async(endpoint_id, api_key, prompt=None):
         return None
 
 
-def save_images(images):
-    """
-    Save base64 images to files.
+def save_images(images: list) -> None:
+    """Save base64 images to files.
     
     Args:
         images: List of image objects with base64 data
@@ -214,7 +217,8 @@ def main():
     parser.add_argument('--endpoint', required=True, help='RunPod endpoint ID')
     parser.add_argument('--api-key', required=True, help='RunPod API key')
     parser.add_argument('--prompt', help='Custom prompt (optional)')
-    parser.add_argument('--async', action='store_true', dest='use_async', help='Use async /run endpoint instead of /runsync')
+    parser.add_argument('--async', action='store_true', dest='use_async', 
+                        help='Use async /run endpoint instead of /runsync')
     
     args = parser.parse_args()
     
@@ -232,5 +236,7 @@ def main():
         print("Test failed!")
         print("=" * 80)
         exit(1)
+
+
 if __name__ == "__main__":
     main()
