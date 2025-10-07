@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 
-def test_runsync(endpoint_id: str, api_key: str, prompt: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def test_runsync(endpoint_id: str, api_key: str, prompt: Optional[str] = None,
+                 model: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Test the /runsync endpoint (synchronous, waits for completion).
     
     Args:
@@ -32,7 +33,7 @@ def test_runsync(endpoint_id: str, api_key: str, prompt: Optional[str] = None) -
         "input": {
             "prompt": prompt or "a beautiful mountain landscape at sunset, highly detailed, 4k",
             "negative_prompt": "blurry, low quality, distorted",
-            "model": "OfficialStableDiffusion/sd_xl_base_1.0",
+            "model": model or "SDXL/sd_xl_base_1.0",
             "width": 1024,
             "height": 1024,
             "steps": 30,
@@ -89,7 +90,8 @@ def test_runsync(endpoint_id: str, api_key: str, prompt: Optional[str] = None) -
         return None
 
 
-def test_run_async(endpoint_id: str, api_key: str, prompt: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def test_run_async(endpoint_id: str, api_key: str, prompt: Optional[str] = None,
+                   model: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Test the /run endpoint (asynchronous, returns job ID immediately).
     
     Args:
@@ -106,7 +108,7 @@ def test_run_async(endpoint_id: str, api_key: str, prompt: Optional[str] = None)
         "input": {
             "prompt": prompt or "a beautiful mountain landscape at sunset, highly detailed, 4k",
             "negative_prompt": "blurry, low quality, distorted",
-            "model": "OfficialStableDiffusion/sd_xl_base_1.0",
+            "model": model or "SDXL/sd_xl_base_1.0",
             "width": 1024,
             "height": 1024,
             "steps": 30,
@@ -217,15 +219,16 @@ def main():
     parser.add_argument('--endpoint', required=True, help='RunPod endpoint ID')
     parser.add_argument('--api-key', required=True, help='RunPod API key')
     parser.add_argument('--prompt', help='Custom prompt (optional)')
+    parser.add_argument('--model', help='SwarmUI model identifier (folder/subfolder/name)')
     parser.add_argument('--async', action='store_true', dest='use_async', 
                         help='Use async /run endpoint instead of /runsync')
     
     args = parser.parse_args()
     
     if args.use_async:
-        result = test_run_async(args.endpoint, args.api_key, args.prompt)
+        result = test_run_async(args.endpoint, args.api_key, args.prompt, args.model)
     else:
-        result = test_runsync(args.endpoint, args.api_key, args.prompt)
+        result = test_runsync(args.endpoint, args.api_key, args.prompt, args.model)
     
     if result:
         print("\n" + "=" * 80)

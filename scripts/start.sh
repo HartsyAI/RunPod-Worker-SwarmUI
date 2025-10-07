@@ -1,6 +1,6 @@
 ﻿#!/bin/bash
 # SwarmUI Startup Script for RunPod Serverless
-# Leverages SwarmUI's own launch scripts - much simpler!
+# Auto-configures ComfyUI backend for serverless environment
 
 set -e
 
@@ -46,7 +46,9 @@ if [ ! -d "$SWARMUI_PATH" ]; then
     
     # Create Model/Output directories and symlink them
     echo "Setting up Models and Output directories..."
-    mkdir -p "$MODELS_PATH"
+    mkdir -p "$MODELS_PATH/Stable-Diffusion"
+    mkdir -p "$MODELS_PATH/Loras"
+    mkdir -p "$MODELS_PATH/VAE"
     mkdir -p "$OUTPUT_PATH"
     rm -rf Models Output 2>/dev/null || true
     ln -sf "$MODELS_PATH" Models
@@ -72,19 +74,71 @@ fi
 # Navigate to SwarmUI directory
 cd "$SWARMUI_PATH"
 
+# CRITICAL FIX: Configure backend BEFORE first launch
+echo "=============================================================================="
+echo "Configuring ComfyUI Backend"
+echo "=============================================================================="
+
+# Create Data directory if it doesn't exist
+mkdir -p Data
+
+# Create Settings.fds file with ComfyUI self-start backend pre-configured
+# This tells SwarmUI to auto-install and start ComfyUI on first run
+cat > Data/Settings.fds << 'EOF'
+{
+  "Backends": {
+    "PerBackendEnable": {
+      "ComfyUI-SelfStart-0": true
+    },
+    "MaxBackendsToAutoAdd": 1
+  },
+  "DefaultBackend": {
+    "Type": "comfyui_selfstart"
+  },
+  "Paths": {
+    "ModelRoot": "Models",
+    "OutputPath": "Output"
+  },
+  "Server": {
+    "Host": "0.0.0.0",
+    "Port": 7801
+  }
+}
+EOF
+
+echo "✓ Backend configuration created"
+
+# Also create backends settings to ensure ComfyUI self-start is enabled
+mkdir -p Data/Backends
+cat > Data/Backends/ComfyUI-SelfStart-0.fds << 'EOF'
+{
+  "ID": "ComfyUI-SelfStart-0",
+  "Title": "ComfyUI-SelfStart-0",
+  "Type": "comfyui_selfstart",
+  "Enabled": true,
+  "StartScript": "dlbackend/ComfyUI/main.py",
+  "GPUIDs": "0"
+}
+EOF
+
+echo "✓ Backend instance configured"
+
 echo "=============================================================================="
 echo "Starting SwarmUI"
 echo "=============================================================================="
 
-# Use SwarmUI's own launch script with serverless parameters
-# The launch script will:
+# Use SwarmUI's launch script
+# The script will:
 # 1. Build SwarmUI if not built (first run)
-# 2. Install ComfyUI backend if not present (first run)
+# 2. Install ComfyUI backend if not present (first run) - BECAUSE we configured it above!
 # 3. Start the SwarmUI server
 #
 # launch_mode none = don't try to open browser
 # host and port for serverless environment
+# --skip-first-time-setup = skip the web install wizard since we pre-configured
 exec ./launch-linux.sh \
     --launch_mode none \
     --host "$SWARMUI_HOST" \
-    --port "$SWARMUI_PORT"
+    --port "$SWARMUI_PORT" \
+    --skip-first-time-setup
+    

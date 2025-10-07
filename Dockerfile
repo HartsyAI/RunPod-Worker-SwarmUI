@@ -79,9 +79,9 @@ EXPOSE ${SWARMUI_PORT}
 # ============================================================================== 
 # Health Check
 # ============================================================================== 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=300s --retries=3 \
-    CMD curl -f http://localhost:${SWARMUI_PORT}/API/GetNewSession || exit 1
-
+HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=3 \
+    CMD curl -f http://localhost:${SWARMUI_PORT}/API/ListBackends || exit 1
+    
 # ============================================================================== 
 # Start Script and Handler
 # ============================================================================== 

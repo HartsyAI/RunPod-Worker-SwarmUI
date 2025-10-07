@@ -1,7 +1,6 @@
 ﻿"""RunPod Handler for SwarmUI Serverless Worker.
 
-Manages SwarmUI readiness, proxies generation requests, and returns base64 images.
-Professional implementation following best practices.
+Enhanced version that waits for ComfyUI backend installation and readiness.
 """
 
 import os
@@ -16,8 +15,9 @@ from urllib3.util.retry import Retry
 # Configuration
 SWARMUI_API_URL = os.getenv('SWARMUI_API_URL', 'http://127.0.0.1:7801')
 GENERATION_TIMEOUT = int(os.getenv('GENERATION_TIMEOUT', '600'))
-SERVICE_WAIT_INTERVAL = int(os.getenv('SERVICE_WAIT_INTERVAL', '5'))
-STARTUP_TIMEOUT = int(os.getenv('STARTUP_TIMEOUT', '900'))
+SERVICE_WAIT_INTERVAL = int(os.getenv('SERVICE_WAIT_INTERVAL', '10'))
+BACKEND_WAIT_INTERVAL = int(os.getenv('BACKEND_WAIT_INTERVAL', '15'))
+STARTUP_TIMEOUT = int(os.getenv('STARTUP_TIMEOUT', '1800'))  # 30 minutes for first install
 MAX_RETRY_ATTEMPTS = max(1, STARTUP_TIMEOUT // max(1, SERVICE_WAIT_INTERVAL))
 
 # Setup session with retries
@@ -42,8 +42,12 @@ def wait_for_service(url: str, max_attempts: int = MAX_RETRY_ATTEMPTS) -> bool:
     Returns:
         bool: True if service is ready, False otherwise
     """
-    print(f"Waiting for SwarmUI service at {url}")
-    print(f"Maximum wait time: {STARTUP_TIMEOUT}s ({max_attempts} attempts @ {SERVICE_WAIT_INTERVAL}s interval)")
+    print("=" * 80)
+    print("STEP 1: Waiting for SwarmUI Service")
+    print("=" * 80)
+    print(f"Target: {url}")
+    print(f"Max wait: {STARTUP_TIMEOUT}s ({max_attempts} attempts @ {SERVICE_WAIT_INTERVAL}s)")
+    print()
 
     for attempt in range(max_attempts):
         try:
@@ -62,15 +66,98 @@ def wait_for_service(url: str, max_attempts: int = MAX_RETRY_ATTEMPTS) -> bool:
                     return True
             
         except requests.exceptions.RequestException as e:
-            print(f"Attempt {attempt + 1}/{max_attempts}: Service not ready... ({type(e).__name__})")
+            elapsed = attempt * SERVICE_WAIT_INTERVAL
+            print(f"  [{elapsed:4d}s] Waiting... ({type(e).__name__})")
             
         except Exception as e:
-            print(f"Unexpected error while waiting for service: {e}")
+            print(f"  Unexpected error: {e}")
         
         if attempt < max_attempts - 1:
             time.sleep(SERVICE_WAIT_INTERVAL)
     
-    print(f"ERROR: SwarmUI service failed to start after {max_attempts} attempts")
+    print(f"ERROR: SwarmUI service failed to start after {STARTUP_TIMEOUT}s")
+    return False
+
+
+def wait_for_backend(url: str, max_wait_seconds: int = 1200) -> bool:
+    """Wait for at least one backend to be available.
+    
+    ComfyUI backend may take 5-15 minutes to install on first run.
+    
+    Args:
+        url: The base URL of the SwarmUI service
+        max_wait_seconds: Maximum seconds to wait for backend
+        
+    Returns:
+        bool: True if backend is ready, False otherwise
+    """
+    print()
+    print("=" * 80)
+    print("STEP 2: Waiting for ComfyUI Backend Installation & Startup")
+    print("=" * 80)
+    print("This may take 5-15 minutes on first run (ComfyUI installation)")
+    print("Subsequent runs should be ready in 30-90 seconds")
+    print()
+    
+    start_time = time.time()
+    max_attempts = max_wait_seconds // BACKEND_WAIT_INTERVAL
+    
+    for attempt in range(max_attempts):
+        elapsed = int(time.time() - start_time)
+        
+        try:
+            # Check backend status via ListBackends API
+            response = session.get(
+                f"{url}/API/ListBackends",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                backends = data.get('backends', [])
+                
+                # Look for enabled backends
+                available_backends = [
+                    b for b in backends 
+                    if b.get('status') == 'running' or b.get('status') == 'ready'
+                ]
+                
+                if available_backends:
+                    print()
+                    print(f"✓ Backend ready after {elapsed}s!")
+                    print(f"  Available backends: {len(available_backends)}")
+                    for backend in available_backends:
+                        print(f"    - {backend.get('title', 'Unknown')}: {backend.get('status')}")
+                    return True
+                
+                # Show status of all backends
+                if backends:
+                    status_msg = ", ".join([
+                        f"{b.get('title', 'Unknown')}: {b.get('status', 'unknown')}"
+                        for b in backends
+                    ])
+                    print(f"  [{elapsed:4d}s] Backends loading: {status_msg}")
+                else:
+                    print(f"  [{elapsed:4d}s] No backends configured yet, waiting...")
+            
+        except requests.exceptions.RequestException as e:
+            print(f"  [{elapsed:4d}s] Checking backends... ({type(e).__name__})")
+        except Exception as e:
+            print(f"  [{elapsed:4d}s] Error checking backends: {e}")
+        
+        if elapsed >= max_wait_seconds:
+            break
+            
+        time.sleep(BACKEND_WAIT_INTERVAL)
+    
+    print()
+    print(f"ERROR: No backends available after {max_wait_seconds}s")
+    print()
+    print("Troubleshooting:")
+    print("  1. Check SwarmUI logs for backend installation errors")
+    print("  2. First run needs 5-15 minutes for ComfyUI installation")
+    print("  3. Ensure sufficient disk space (15GB+ for container)")
+    print("  4. Check that Settings.fds has backend configuration")
     return False
 
 
@@ -107,24 +194,19 @@ def fetch_image_as_base64(image_path: str) -> Optional[Dict[str, str]]:
     """Fetch an image from SwarmUI and convert to base64.
     
     Args:
-        image_path: Path returned by SwarmUI API (e.g., "View/local/raw/...")
+        image_path: Path returned by SwarmUI API
         
     Returns:
         dict: Image data with filename, type, and base64 data, or None if failed
     """
     try:
-        # Construct full URL - image_path already includes the path
         img_url = f"{SWARMUI_API_URL}/{image_path}"
-        
         print(f"Fetching image from: {img_url}")
         
         response = session.get(img_url, timeout=30)
         response.raise_for_status()
         
-        # Convert to base64
         img_base64 = base64.b64encode(response.content).decode('utf-8')
-        
-        # Extract filename from path
         filename = image_path.split('/')[-1]
         
         return {
@@ -178,8 +260,14 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
         "donotsave": False
     }
     
-    print(f"Generating image with prompt: '{prompt[:60]}...'")
-    print(f"Model: {model}, Size: {width}x{height}, Steps: {steps}")
+    print()
+    print("=" * 80)
+    print("STEP 3: Generating Image")
+    print("=" * 80)
+    print(f"Prompt: '{prompt[:60]}...'")
+    print(f"Model: {model}")
+    print(f"Size: {width}x{height}, Steps: {steps}, CFG: {cfg_scale}")
+    print()
     
     try:
         # Send generation request
@@ -212,6 +300,8 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
             
             if len(images) == 0:
                 return {"error": "Failed to fetch any generated images"}
+            
+            print(f"✓ Successfully returned {len(images)} image(s)")
             
             return {
                 "images": images,
@@ -248,8 +338,9 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         dict: Result or error
     """
     try:
+        print()
         print("=" * 80)
-        print("SwarmUI Handler - Processing Request")
+        print("SwarmUI RunPod Serverless - Processing Request")
         print("=" * 80)
         
         job_input = job.get('input', {})
@@ -260,7 +351,9 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         # Generate image
         result = generate_image(job_input)
         
-        print("✓ Request completed")
+        print()
+        print("=" * 80)
+        print("✓ Request Completed")
         print("=" * 80)
         
         return result
@@ -270,16 +363,31 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Handler error: {str(e)}"}
 
 
-# Initialize - wait for SwarmUI to be ready
+# Initialize - wait for SwarmUI AND backend to be ready
 if __name__ == "__main__":
     print("=" * 80)
-    print("SwarmUI RunPod Serverless Worker")
+    print("SwarmUI RunPod Serverless Worker - Initialization")
     print("=" * 80)
+    print()
     
-    # Wait for SwarmUI to start
+    # Step 1: Wait for SwarmUI server to start
     if not wait_for_service(SWARMUI_API_URL):
+        print()
         print("FATAL: SwarmUI service failed to start")
         exit(1)
     
-    print("✓ Starting RunPod serverless handler...")
+    # Step 2: Wait for ComfyUI backend to install and start
+    if not wait_for_backend(SWARMUI_API_URL):
+        print()
+        print("FATAL: No backends available after timeout")
+        print("Check container logs for installation errors")
+        exit(1)
+    
+    print()
+    print("=" * 80)
+    print("✓ System Ready - Starting RunPod Handler")
+    print("=" * 80)
+    print()
+    
     runpod.serverless.start({"handler": handler})
+    
