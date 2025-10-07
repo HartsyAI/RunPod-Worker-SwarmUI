@@ -17,7 +17,7 @@ SWARMUI_API_URL = os.getenv('SWARMUI_API_URL', 'http://127.0.0.1:7801')
 GENERATION_TIMEOUT = int(os.getenv('GENERATION_TIMEOUT', '600'))
 SERVICE_WAIT_INTERVAL = int(os.getenv('SERVICE_WAIT_INTERVAL', '10'))
 BACKEND_WAIT_INTERVAL = int(os.getenv('BACKEND_WAIT_INTERVAL', '15'))
-STARTUP_TIMEOUT = int(os.getenv('STARTUP_TIMEOUT', '1800'))  # 30 minutes for first install
+STARTUP_TIMEOUT = int(os.getenv('STARTUP_TIMEOUT', '1800'))  # 30 min for first install
 MAX_RETRY_ATTEMPTS = max(1, STARTUP_TIMEOUT // max(1, SERVICE_WAIT_INTERVAL))
 
 # Setup session with retries
@@ -106,44 +106,88 @@ def wait_for_backend(url: str, max_wait_seconds: int = 1200) -> bool:
         elapsed = int(time.time() - start_time)
         
         try:
-            # Check backend status via ListBackends API
-            response = session.get(
+            # Method 1: Try to list backends (requires POST!)
+            response = session.post(
                 f"{url}/API/ListBackends",
+                json={},
                 timeout=10
             )
             
             if response.status_code == 200:
-                data = response.json()
-                backends = data.get('backends', [])
+                try:
+                    data = response.json()
+                    backends = data.get('backends', [])
+                    
+                    # Look for enabled and running backends
+                    available_backends = [
+                        b for b in backends 
+                        if b.get('status') in ['running', 'ready', 'loaded']
+                    ]
+                    
+                    if available_backends:
+                        print()
+                        print(f"✓ Backend ready after {elapsed}s!")
+                        print(f"  Available backends: {len(available_backends)}")
+                        for backend in available_backends:
+                            print(f"    - {backend.get('title', 'Unknown')}: {backend.get('status')}")
+                        return True
+                    
+                    # Show status of all backends
+                    if backends:
+                        status_msg = ", ".join([
+                            f"{b.get('title', 'Unknown')}: {b.get('status', 'unknown')}"
+                            for b in backends
+                        ])
+                        print(f"  [{elapsed:4d}s] {status_msg}")
+                    else:
+                        print(f"  [{elapsed:4d}s] No backends configured yet...")
+                        
+                except (ValueError, KeyError) as e:
+                    print(f"  [{elapsed:4d}s] Backend API returned invalid data, retrying...")
+                    
+            elif response.status_code == 400:
+                # Bad request - API format might have changed
+                print(f"  [{elapsed:4d}s] ListBackends returned 400, trying alternative check...")
                 
-                # Look for enabled backends
-                available_backends = [
-                    b for b in backends 
-                    if b.get('status') == 'running' or b.get('status') == 'ready'
-                ]
-                
-                if available_backends:
-                    print()
-                    print(f"✓ Backend ready after {elapsed}s!")
-                    print(f"  Available backends: {len(available_backends)}")
-                    for backend in available_backends:
-                        print(f"    - {backend.get('title', 'Unknown')}: {backend.get('status')}")
-                    return True
-                
-                # Show status of all backends
-                if backends:
-                    status_msg = ", ".join([
-                        f"{b.get('title', 'Unknown')}: {b.get('status', 'unknown')}"
-                        for b in backends
-                    ])
-                    print(f"  [{elapsed:4d}s] Backends loading: {status_msg}")
-                else:
-                    print(f"  [{elapsed:4d}s] No backends configured yet, waiting...")
+                # Method 2: Try to get a session and check for backend errors
+                try:
+                    test_response = session.post(
+                        f"{url}/API/GetNewSession",
+                        json={},
+                        timeout=10
+                    )
+                    
+                    if test_response.status_code == 200:
+                        # If we can get a session, try a simple generation to test backend
+                        test_gen = session.post(
+                            f"{url}/API/GenerateText2Image",
+                            json={
+                                "session_id": test_response.json().get('session_id'),
+                                "prompt": "test",
+                                "images": 0  # Don't actually generate
+                            },
+                            timeout=5
+                        )
+                        
+                        # If we get anything other than "no backends", consider it ready
+                        if test_gen.status_code == 200:
+                            result = test_gen.json()
+                            if 'error' not in result or 'No backends available' not in str(result.get('error', '')):
+                                print(f"✓ Backend ready after {elapsed}s! (confirmed via test)")
+                                return True
+                            else:
+                                print(f"  [{elapsed:4d}s] Still no backends available...")
+                                
+                except Exception:
+                    pass  # Ignore errors in fallback check
+                    
+            else:
+                print(f"  [{elapsed:4d}s] ListBackends returned {response.status_code}")
             
         except requests.exceptions.RequestException as e:
             print(f"  [{elapsed:4d}s] Checking backends... ({type(e).__name__})")
         except Exception as e:
-            print(f"  [{elapsed:4d}s] Error checking backends: {e}")
+            print(f"  [{elapsed:4d}s] Error: {type(e).__name__}")
         
         if elapsed >= max_wait_seconds:
             break
@@ -157,7 +201,7 @@ def wait_for_backend(url: str, max_wait_seconds: int = 1200) -> bool:
     print("  1. Check SwarmUI logs for backend installation errors")
     print("  2. First run needs 5-15 minutes for ComfyUI installation")
     print("  3. Ensure sufficient disk space (15GB+ for container)")
-    print("  4. Check that Settings.fds has backend configuration")
+    print("  4. Verify Settings.fds has backend configuration")
     return False
 
 
