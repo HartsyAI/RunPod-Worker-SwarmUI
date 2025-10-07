@@ -27,6 +27,7 @@ RUN apt-get update && \
         apt-transport-https \
         gnupg \
         software-properties-common \
+        dos2unix \
         # Build tools
         build-essential \
         git \
@@ -65,11 +66,15 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip && \
     rm /requirements.txt
 
 # ============================================================================== 
-# Copy Application Files
+# Copy Application Files and Fix Line Endings
 # ============================================================================== 
 COPY src/rp_handler.py /rp_handler.py
 COPY scripts/start.sh /start.sh
-RUN chmod +x /start.sh
+
+# CRITICAL: Remove BOM and fix line endings
+RUN dos2unix /start.sh && \
+    chmod +x /start.sh && \
+    dos2unix /rp_handler.py || true
 
 # ============================================================================== 
 # Expose SwarmUI Port
@@ -77,14 +82,14 @@ RUN chmod +x /start.sh
 EXPOSE ${SWARMUI_PORT}
 
 # ============================================================================== 
-# Health Check
+# Health Check - Use POST with session_id
 # ============================================================================== 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=3 \
-    CMD curl -f http://localhost:${SWARMUI_PORT}/API/ListBackends || exit 1
-    
+    CMD curl -f -X POST http://localhost:${SWARMUI_PORT}/API/GetNewSession \
+        -H "Content-Type: application/json" \
+        -d '{}' || exit 1
+
 # ============================================================================== 
 # Start Script and Handler
 # ============================================================================== 
-# Run start.sh in background to install/launch SwarmUI
-# Then run handler in foreground to process RunPod jobs
 CMD ["/bin/bash", "-c", "/start.sh & python3 -u /rp_handler.py"]
