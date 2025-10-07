@@ -106,10 +106,28 @@ def wait_for_backend(url: str, max_wait_seconds: int = 1200) -> bool:
         elapsed = int(time.time() - start_time)
         
         try:
-            # Method 1: Try to list backends (requires POST!)
+            # CRITICAL: Must get session_id first - required for ALL SwarmUI API calls
+            session_resp = session.post(
+                f"{url}/API/GetNewSession",
+                json={},
+                timeout=10
+            )
+            
+            if session_resp.status_code != 200:
+                print(f"  [{elapsed:4d}s] Cannot get session...")
+                time.sleep(BACKEND_WAIT_INTERVAL)
+                continue
+            
+            session_id = session_resp.json().get('session_id')
+            if not session_id:
+                print(f"  [{elapsed:4d}s] No session ID received...")
+                time.sleep(BACKEND_WAIT_INTERVAL)
+                continue
+            
+            # Now use session_id to list backends
             response = session.post(
                 f"{url}/API/ListBackends",
-                json={},
+                json={"session_id": session_id},
                 timeout=10
             )
             
@@ -146,38 +164,39 @@ def wait_for_backend(url: str, max_wait_seconds: int = 1200) -> bool:
                     print(f"  [{elapsed:4d}s] Backend API returned invalid data, retrying...")
                     
             elif response.status_code == 400:
-                # Bad request - API format might have changed
-                print(f"  [{elapsed:4d}s] ListBackends returned 400, trying alternative check...")
+                # Bad request - try test generation to check backend
+                print(f"  [{elapsed:4d}s] ListBackends unavailable, trying test generation...")
                 
-                # Method 2: Try to get a session and check for backend errors
                 try:
-                    test_response = session.post(
-                        f"{url}/API/GetNewSession",
-                        json={},
+                    # Try a minimal test generation to see if backend responds
+                    test_gen = session.post(
+                        f"{url}/API/GenerateText2Image",
+                        json={
+                            "session_id": session_id,
+                            "prompt": "test",
+                            "model": "OfficialStableDiffusion/sd_xl_base_1.0",
+                            "images": 0,  # Don't actually generate
+                            "width": 512,
+                            "height": 512,
+                            "steps": 1
+                        },
                         timeout=10
                     )
                     
-                    if test_response.status_code == 200:
-                        # If we can get a session, try a simple generation to test backend
-                        test_gen = session.post(
-                            f"{url}/API/GenerateText2Image",
-                            json={
-                                "session_id": test_response.json().get('session_id'),
-                                "prompt": "test",
-                                "images": 0  # Don't actually generate
-                            },
-                            timeout=5
-                        )
+                    if test_gen.status_code == 200:
+                        result = test_gen.json()
+                        error = result.get('error', '')
                         
-                        # If we get anything other than "no backends", consider it ready
-                        if test_gen.status_code == 200:
-                            result = test_gen.json()
-                            if 'error' not in result or 'No backends available' not in str(result.get('error', '')):
-                                print(f"✓ Backend ready after {elapsed}s! (confirmed via test)")
-                                return True
-                            else:
-                                print(f"  [{elapsed:4d}s] Still no backends available...")
-                                
+                        if 'No backends available' in str(error):
+                            print(f"  [{elapsed:4d}s] Backend still installing...")
+                        elif error and 'backend' not in str(error).lower():
+                            # Some other error means backend exists
+                            print(f"✓ Backend ready after {elapsed}s! (detected via test)")
+                            return True
+                        elif not error:
+                            print(f"✓ Backend ready after {elapsed}s!")
+                            return True
+                            
                 except Exception:
                     pass  # Ignore errors in fallback check
                     
