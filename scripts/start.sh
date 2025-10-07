@@ -1,6 +1,6 @@
 ﻿#!/bin/bash
 # SwarmUI Startup Script for RunPod Serverless
-# Auto-configures ComfyUI backend for serverless environment
+# Manually installs ComfyUI to ensure it's always available
 
 set -e
 
@@ -13,6 +13,7 @@ VOLUME_PATH="${VOLUME_PATH:-/runpod-volume}"
 SWARMUI_PATH="$VOLUME_PATH/SwarmUI"
 MODELS_PATH="$VOLUME_PATH/Models"
 OUTPUT_PATH="$VOLUME_PATH/Output"
+COMFY_PATH="$SWARMUI_PATH/dlbackend/ComfyUI"
 SWARMUI_PORT="${SWARMUI_PORT:-7801}"
 SWARMUI_HOST="${SWARMUI_HOST:-0.0.0.0}"
 
@@ -23,7 +24,6 @@ echo "==========================================================================
 # Check if network volume is mounted
 if [ ! -d "$VOLUME_PATH" ]; then
     echo "ERROR: Network volume not mounted at $VOLUME_PATH"
-    echo "Please attach a network volume to your serverless endpoint"
     exit 1
 fi
 
@@ -33,19 +33,16 @@ echo "✓ Network volume detected"
 if [ ! -d "$SWARMUI_PATH" ]; then
     echo "=============================================================================="
     echo "First-time setup: Installing SwarmUI"
-    echo "This will take 10-20 minutes (build + ComfyUI install)"
     echo "=============================================================================="
     
     cd "$VOLUME_PATH"
     
-    # Clone SwarmUI
     echo "Cloning SwarmUI repository..."
     git clone https://github.com/mcmonkeyprojects/SwarmUI.git
     
     cd "$SWARMUI_PATH"
     
-    # Create Model/Output directories and symlink them
-    echo "Setting up Models and Output directories..."
+    echo "Setting up directories..."
     mkdir -p "$MODELS_PATH/Stable-Diffusion"
     mkdir -p "$MODELS_PATH/Loras"
     mkdir -p "$MODELS_PATH/VAE"
@@ -54,10 +51,9 @@ if [ ! -d "$SWARMUI_PATH" ]; then
     ln -sf "$MODELS_PATH" Models
     ln -sf "$OUTPUT_PATH" Output
     
-    echo "✓ SwarmUI cloned and directories configured"
+    echo "✓ SwarmUI cloned"
 else
-    echo "✓ SwarmUI installation found, using existing setup"
-    
+    echo "✓ SwarmUI found"
     cd "$SWARMUI_PATH"
     
     # Ensure symlinks exist
@@ -71,74 +67,109 @@ else
     fi
 fi
 
-# Navigate to SwarmUI directory
+# Install ComfyUI Backend Using SwarmUI's Official Script
+echo "=============================================================================="
+echo "ComfyUI Backend Setup"
+echo "=============================================================================="
+
+if [ ! -d "$COMFY_PATH" ]; then
+    echo "Installing ComfyUI using SwarmUI's official installer..."
+    echo "This will take 5-10 minutes (download + PyTorch + dependencies)..."
+    
+    cd "$SWARMUI_PATH"
+    
+    # SwarmUI's official ComfyUI installation script
+    # Located at launchtools/comfy-install-linux.sh
+    INSTALL_SCRIPT="launchtools/comfy-install-linux.sh"
+    
+    if [ -f "$INSTALL_SCRIPT" ]; then
+        echo "Found SwarmUI's official installer: $INSTALL_SCRIPT"
+        chmod +x "$INSTALL_SCRIPT"
+        
+        # Run with 'nv' for NVIDIA GPUs (RunPod uses NVIDIA)
+        # This is exactly what SwarmUI does during first-run setup
+        bash "$INSTALL_SCRIPT" nv
+        
+        if [ $? -eq 0 ]; then
+            echo "✓ ComfyUI installed successfully"
+        else
+            echo "ERROR: ComfyUI installation failed"
+            echo "Check logs above for details"
+            exit 1
+        fi
+    else
+        echo "ERROR: SwarmUI installation script not found at $INSTALL_SCRIPT"
+        echo "SwarmUI repository may be incomplete or corrupted"
+        echo "Looking for script in current directory..."
+        ls -la launchtools/ || echo "launchtools/ directory not found"
+        exit 1
+    fi
+else
+    echo "✓ ComfyUI already installed at $COMFY_PATH"
+fi
+
+# Configure backend settings
+echo "=============================================================================="
+echo "Configuring Backend"
+echo "=============================================================================="
+
 cd "$SWARMUI_PATH"
+mkdir -p Data/Backends
 
-# CRITICAL FIX: Configure backend BEFORE first launch
-echo "=============================================================================="
-echo "Configuring ComfyUI Backend"
-echo "=============================================================================="
-
-# Create Data directory if it doesn't exist
-mkdir -p Data
-
-# Create Settings.fds file with ComfyUI self-start backend pre-configured
-# This tells SwarmUI to auto-install and start ComfyUI on first run
-cat > Data/Settings.fds << 'EOF'
+# Create backend configuration file
+cat > Data/Backends/ComfyUI-SelfStart-0.fds << 'EOF'
 {
-  "Backends": {
-    "PerBackendEnable": {
-      "ComfyUI-SelfStart-0": true
-    },
-    "MaxBackendsToAutoAdd": 1
-  },
-  "DefaultBackend": {
-    "Type": "comfyui_selfstart"
-  },
-  "Paths": {
-    "ModelRoot": "Models",
-    "OutputPath": "Output"
-  },
-  "Server": {
-    "Host": "0.0.0.0",
-    "Port": 7801
-  }
+  "ID": "ComfyUI-SelfStart-0",
+  "Title": "ComfyUI Backend",
+  "Type": "comfyui_selfstart",
+  "Enabled": true,
+  "StartScript": "dlbackend/ComfyUI/main.py",
+  "ExtraArgs": "",
+  "GPUIDs": "0",
+  "MemoryGB": 0,
+  "NetworkHost": "127.0.0.1",
+  "NetworkPort": 7821,
+  "PythonVenvPath": "dlbackend/ComfyUI/venv"
 }
 EOF
 
 echo "✓ Backend configuration created"
 
-# Also create backends settings to ensure ComfyUI self-start is enabled
-mkdir -p Data/Backends
-cat > Data/Backends/ComfyUI-SelfStart-0.fds << 'EOF'
-{
-  "ID": "ComfyUI-SelfStart-0",
-  "Title": "ComfyUI-SelfStart-0",
-  "Type": "comfyui_selfstart",
-  "Enabled": true,
-  "StartScript": "dlbackend/ComfyUI/main.py",
-  "GPUIDs": "0"
-}
-EOF
-
-echo "✓ Backend instance configured"
+# Build SwarmUI if not built yet
+if [ ! -d "bin" ] || [ ! -f "bin/SwarmUI.dll" ]; then
+    echo "=============================================================================="
+    echo "Building SwarmUI (5-10 minutes)..."
+    echo "=============================================================================="
+    
+    # Make launch script executable
+    chmod +x ./launch-linux.sh
+    
+    # Run build
+    ./launch-linux.sh --launch_mode none --build-only || {
+        echo "Build with launch script failed, trying dotnet build..."
+        dotnet build src/SwarmUI.csproj -c Release -o bin/
+    }
+    
+    echo "✓ Build complete"
+fi
 
 echo "=============================================================================="
 echo "Starting SwarmUI"
 echo "=============================================================================="
 
-# Use SwarmUI's launch script
-# The script will:
-# 1. Build SwarmUI if not built (first run)
-# 2. Install ComfyUI backend if not present (first run) - BECAUSE we configured it above!
-# 3. Start the SwarmUI server
-#
-# launch_mode none = don't try to open browser
-# host and port for serverless environment
-# --skip-first-time-setup = skip the web install wizard since we pre-configured
-exec ./launch-linux.sh \
+if [ ! -d "bin" ] || [ ! -f "bin/SwarmUI.dll" ]; then
+    echo "First run - will build and install (15-20 minutes total)"
+else
+    echo "Existing build - should be ready in 60-90 seconds"
+fi
+
+echo "=============================================================================="
+echo "SwarmUI Output:"
+echo "=============================================================================="
+
+# Start SwarmUI directly with dotnet for better control
+exec dotnet bin/SwarmUI.dll \
     --launch_mode none \
     --host "$SWARMUI_HOST" \
-    --port "$SWARMUI_PORT" \
-    --skip-first-time-setup
+    --port "$SWARMUI_PORT" 2>&1
     
