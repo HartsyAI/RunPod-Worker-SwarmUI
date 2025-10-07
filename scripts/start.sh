@@ -136,38 +136,69 @@ EOF
 echo "✓ Backend configuration created"
 
 # Build SwarmUI if not built yet
-if [ ! -d "bin" ] || [ ! -f "bin/SwarmUI.dll" ]; then
-    echo "=============================================================================="
-    echo "Building SwarmUI (5-10 minutes)..."
-    echo "=============================================================================="
-    
-    # Make launch script executable
-    chmod +x ./launch-linux.sh
-    
-    # Run build
-    ./launch-linux.sh --launch_mode none --build-only || {
-        echo "Build with launch script failed, trying dotnet build..."
-        dotnet build src/SwarmUI.csproj -c Release -o bin/
-    }
-    
-    echo "✓ Build complete"
-fi
-
 echo "=============================================================================="
-echo "Starting SwarmUI"
+echo "SwarmUI Build Check"
 echo "=============================================================================="
 
+cd "$SWARMUI_PATH"
+
 if [ ! -d "bin" ] || [ ! -f "bin/SwarmUI.dll" ]; then
-    echo "First run - will build and install (15-20 minutes total)"
+    echo "SwarmUI not built yet - building now (this takes 5-10 minutes)..."
+    echo ""
+    
+    # Verify .NET is available
+    if ! command -v dotnet &> /dev/null; then
+        echo "ERROR: dotnet command not found"
+        echo "Please ensure .NET 8 SDK is installed"
+        exit 1
+    fi
+    
+    echo "Using .NET: $(dotnet --version)"
+    echo ""
+    
+    # Build SwarmUI
+    echo "Building SwarmUI..."
+    dotnet build src/SwarmUI.csproj -c Release -o bin/ 2>&1
+    
+    if [ $? -eq 0 ] && [ -f "bin/SwarmUI.dll" ]; then
+        echo ""
+        echo "✓ SwarmUI built successfully"
+    else
+        echo ""
+        echo "ERROR: SwarmUI build failed!"
+        echo "Check build output above for errors"
+        echo ""
+        echo "Checking if SwarmUI.dll exists:"
+        ls -la bin/SwarmUI.dll 2>&1 || echo "bin/SwarmUI.dll not found"
+        exit 1
+    fi
 else
-    echo "Existing build - should be ready in 60-90 seconds"
+    echo "✓ SwarmUI already built at bin/SwarmUI.dll"
 fi
 
 echo "=============================================================================="
-echo "SwarmUI Output:"
+echo "Starting SwarmUI Server"
 echo "=============================================================================="
 
-# Start SwarmUI directly with dotnet for better control
+# Verify the binary exists before trying to run
+if [ ! -f "bin/SwarmUI.dll" ]; then
+    echo "FATAL: bin/SwarmUI.dll not found!"
+    echo "Build should have created it but it's missing"
+    ls -la bin/ || echo "bin/ directory doesn't exist"
+    exit 1
+fi
+
+echo "Server: $SWARMUI_HOST:$SWARMUI_PORT"
+echo "Backend: ComfyUI (self-start on port 7821)"
+echo "Data: $SWARMUI_PATH/Data"
+echo "Models: $MODELS_PATH"
+echo "Output: $OUTPUT_PATH"
+echo "=============================================================================="
+echo ""
+echo "Starting SwarmUI... (logs will appear below)"
+echo ""
+
+# Start SwarmUI - use exec to replace this process
 exec dotnet bin/SwarmUI.dll \
     --launch_mode none \
     --host "$SWARMUI_HOST" \
