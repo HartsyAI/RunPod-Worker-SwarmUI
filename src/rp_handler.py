@@ -1,4 +1,4 @@
-﻿"""RunPod Handler for SwarmUI Serverless Worker - Simplified Version
+"""RunPod Handler for SwarmUI Serverless Worker - Simplified Version
 
 Uses SwarmUI's official install and launch scripts.
 Just waits for readiness and handles generation requests.
@@ -29,6 +29,24 @@ retries = Retry(
 )
 session.mount('http://', HTTPAdapter(max_retries=retries))
 session.mount('https://', HTTPAdapter(max_retries=retries))
+
+
+def wait_for_service(url: str, max_attempts: Optional[int] = None) -> bool:
+    """Wait briefly for a SwarmUI endpoint to respond."""
+
+    attempts = max_attempts or max(1, STARTUP_TIMEOUT // CHECK_INTERVAL)
+
+    for attempt in range(attempts):
+        try:
+            response = session.post(f"{url}/API/GetNewSession", json={}, timeout=10)
+            if response.status_code == 200 and "session_id" in response.json():
+                return True
+        except requests.exceptions.RequestException:
+            pass
+
+        time.sleep(CHECK_INTERVAL)
+
+    return False
 
 
 def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
@@ -132,61 +150,49 @@ def get_session_id() -> Optional[str]:
         
         data = response.json()
         session_id = data.get("session_id")
-        
+
         if session_id:
             print(f"✓ Session ID: {session_id[:16]}...")
             return session_id
-        else:
-            print("ERROR: No session_id in response")
-            return None
-            
+
+        print("ERROR: No session_id in response")
+        return None
     except Exception as e:
         print(f"ERROR: Failed to get session: {e}")
         return None
 
 
-def fetch_image_as_base64(image_path: str) -> Optional[Dict[str, str]]:
-    """Fetch image from SwarmUI and convert to base64.
-    
-    Args:
-        image_path: Path from SwarmUI API response
-        
-    Returns:
-        dict: Image data with filename, type, and base64 data
-    """
-    try:
-        img_url = f"{SWARMUI_API_URL}/{image_path}"
-        response = session.get(img_url, timeout=30)
-        response.raise_for_status()
-        
-        img_base64 = base64.b64encode(response.content).decode('utf-8')
-        filename = image_path.split('/')[-1]
-        
-        return {
-            "filename": filename,
-            "type": "base64",
-            "data": img_base64
-        }
-        
-    except Exception as e:
-        print(f"ERROR: Failed to fetch {image_path}: {e}")
-        return None
-
-
 def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate image using SwarmUI API.
-    
+    """Generate an image using SwarmUI API.
+
     Args:
-        job_input: Generation parameters
-        
+        job_input: Dictionary containing generation parameters
+
     Returns:
         dict: Generation result with images or error
     """
-    # Get session
+    # Support install-only warm up to trigger SwarmUI boot without requiring models.
+    if job_input.get("install_only"):
+        print("Install-only warm-up requested; ensuring SwarmUI service is ready...")
+
+        if not wait_for_service(SWARMUI_API_URL):
+            return {"error": "SwarmUI service not ready during install warm-up"}
+
+        session_id = get_session_id()
+        if not session_id:
+            return {"error": "Failed to obtain session during install warm-up"}
+
+        return {
+            "status": "install_ready",
+            "message": "SwarmUI responded successfully to install-only warm-up",
+            "session_id": session_id,
+        }
+
+    # Get session ID
     session_id = get_session_id()
     if not session_id:
-        return {"error": "Failed to create session"}
-    
+        return {"error": "Failed to create SwarmUI session"}
+
     # Extract parameters with defaults
     prompt = job_input.get('prompt', 'a beautiful landscape')
     negative_prompt = job_input.get('negative_prompt', '')
@@ -197,8 +203,8 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
     cfg_scale = float(job_input.get('cfg_scale', 7.5))
     seed = int(job_input.get('seed', -1))
     images_count = int(job_input.get('images', 1))
-    
-    # Build request
+
+    # Build SwarmUI API request
     swarm_request = {
         "session_id": session_id,
         "prompt": prompt,
