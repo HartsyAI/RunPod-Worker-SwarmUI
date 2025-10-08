@@ -1,225 +1,204 @@
 # RunPod SwarmUI Serverless Worker
 
-**Production-ready SwarmUI on RunPod Serverless** - Deploy powerful AI image generation with persistent storage and pay-per-use pricing.
+**Production-ready SwarmUI on RunPod Serverless** using official SwarmUI installation scripts.
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> ·
+  <a href="#how-it-works">How It Works</a> ·
   <a href="#features">Features</a> ·
-  <a href="#requirements">Requirements</a> ·
-  <a href="#documentation">Docs</a> ·
-  <a href="#architecture">Architecture</a>
+  <a href="#documentation">Docs</a>
 </p>
 
 ---
 
-## 🎯 Highlights
+## 🎯 Key Features
 
-- **Serverless Architecture** – Built on RunPod's serverless platform with automatic scaling
-- **Persistent Storage** – Full SwarmUI installation on network volume, models persist across workers
-- **Production Ready** – Professional code following best practices, comprehensive error handling
-- **Cost Effective** – Pay only when generating, $0 when idle (0 active workers)
-- **Full SwarmUI** – Complete SwarmUI with ComfyUI backend, all features available
-
----
-
-## ✨ Features
-
-- **Automatic Installation** – First run installs SwarmUI + ComfyUI to network volume (~20 min)
-- **Fast Subsequent Starts** – Reuses existing installation (~60-90s cold start)
-- **Session Management** – Proper SwarmUI session handling for reliable generation
-- **Base64 Images** – Returns images as base64 for easy integration
-- **Comprehensive Testing** – Included test scripts for both sync and async endpoints
-- **CI/CD Ready** – GitHub Actions workflow for automated Docker builds
-
----
-
-## 📋 Requirements
-
-### RunPod Account
-- Active RunPod account with credits ($10 minimum recommended)
-- RunPod API key (for testing)
-
-### Network Volume
-- **Required**: RunPod network volume
-- **Minimum Size**: 50GB (basic), 100GB (recommended), 500GB+ (extensive models)
-- **Purpose**: Stores SwarmUI installation, ComfyUI backend, models, outputs
-- **Cost**: ~$7/month for 100GB
-
-### GPU Selection
-- **RTX 4090 (24GB)**: Best for SDXL - $0.00019/second (~$0.68/hour)
-- **A100 (40GB)**: Large models - $0.00069/second (~$2.48/hour)
-- **A100 (80GB)**: Multiple large models - $0.00099/second (~$3.56/hour)
-
-> ⚠️ **Network volume is required** – Without it, every cold start re-installs everything (20+ minutes)
+- **Official SwarmUI Scripts** – Uses SwarmUI's `install-linux.sh` and `launch-linux.sh` (no reinventing the wheel)
+- **Automatic ComfyUI** – SwarmUI installs and manages ComfyUI backend automatically
+- **Persistent Storage** – Everything saved to RunPod network volume
+- **Zero Idle Cost** – Pay only when generating (0 active workers)
+- **Fast After First Run** – First run: 15-20 min, subsequent: 60-90s
 
 ---
 
 ## 🚀 Quick Start
 
 ### 1. Create Network Volume
+
 ```bash
 # Go to: https://runpod.io/console/storage
 # Click: "+ New Network Volume"
-# Configure:
-#   - Name: swarmui-models
-#   - Size: 100GB minimum
+# Settings:
+#   - Name: swarmui-storage
+#   - Size: 100GB minimum (200GB recommended)
 #   - Datacenter: EU-RO-1 or US-GA
-# Click: "Create"
 ```
 
-### 2. Deploy Docker Image
-
-**Option A: Use Pre-built Image** (easiest)
-```
-yourusername/swarmui-runpod:latest
-```
-
-**Option B: Build Your Own**
-```bash
-git clone https://github.com/YOUR_USERNAME/runpod-swarmui-serverless.git
-cd runpod-swarmui-serverless
-
-# Build for linux/amd64
-docker build --platform linux/amd64 -t yourusername/swarmui-runpod:latest .
-
-# Push to Docker Hub
-docker push yourusername/swarmui-runpod:latest
-```
-
-### 3. Create RunPod Endpoint
+### 2. Deploy Endpoint
 
 ```bash
-# Go to: https://runpod.io/console/serverless/user/endpoints
+# Go to: https://runpod.io/console/serverless
 # Click: "+ New Endpoint"
-# Configure:
+# Settings:
 #   - Container Image: yourusername/swarmui-runpod:latest
-#   - GPU: RTX 4090 (24GB)
-#   - Active Workers: 0 (pay only when used)
+#   - GPU: RTX 4090 (24GB) recommended
+#   - Active Workers: 0
 #   - Max Workers: 3
 #   - Idle Timeout: 120s
-#   - Network Volume: swarmui-models
-#   - Container Disk: 15GB
-# Click: "Deploy"
+#   - Network Volume: swarmui-storage
+#   - Container Disk: 20GB
 ```
 
-### 4. Wait for First Install
+### 3. Wait for First Installation
 
-**First startup timeline:**
-- Container initialization: 30s
-- SwarmUI clone and build: 5-10min
-- ComfyUI installation: 5-10min
-- Ready to use: **~20 minutes total**
+**First run timeline:**
+- Download SwarmUI installer: 30s
+- Install SwarmUI: 2-3 minutes
+- Build SwarmUI: 3-5 minutes
+- Install ComfyUI: 5-10 minutes
+- **Total: 15-20 minutes**
 
-**Subsequent startups:**
-- Cold start: 60-90 seconds
-- Warm worker: Instant
+**Subsequent runs: 60-90 seconds** (just startup, no installation)
 
-### 5. Test Your Endpoint
+### 4. Test It
 
 ```bash
-# Install test dependencies
-pip install requests
-
-# Test the endpoint
 python tests/test_endpoint.py \
   --endpoint YOUR_ENDPOINT_ID \
   --api-key YOUR_RUNPOD_API_KEY
-
-# With custom prompt
-python tests/test_endpoint.py \
-  --endpoint YOUR_ENDPOINT_ID \
-  --api-key YOUR_RUNPOD_API_KEY \
-  --prompt "a majestic dragon"
-
-# Async mode
-python tests/test_endpoint.py \
-  --endpoint YOUR_ENDPOINT_ID \
-  --api-key YOUR_RUNPOD_API_KEY \
-  --async
 ```
 
-Images will be saved to `./output/` directory.
-
 ---
 
-## 📖 Documentation
+## 🏗️ How It Works
 
-- **[Quick Start](docs/QUICKSTART.md)** – Get running in 10 minutes
-- **[Setup Guide](docs/SETUP.md)** – Comprehensive deployment instructions
-- **[Deployment Checklist](docs/DEPLOYMENT_CHECKLIST.md)** – Step-by-step validation
-- **[Architecture](docs/ARCHITECTURE.md)** – Technical details and design
-- **[Troubleshooting](docs/TROUBLESHOOTING.md)** – Common issues and solutions
-- **[File Structure](FILE_STRUCTURE.md)** – Complete repository layout
+### The Smart Approach
 
----
+Instead of manually managing SwarmUI installation, we use SwarmUI's **official installation scripts**:
 
-## 🏗️ Architecture
+1. **First Run:**
+   ```bash
+   # start.sh downloads and runs SwarmUI's official installer
+   wget https://github.com/mcmonkeyprojects/SwarmUI/releases/download/0.6.5-Beta/install-linux.sh
+   ./install-linux.sh
+   
+   # Then launches SwarmUI (which auto-installs ComfyUI)
+   ./launch-linux.sh --launch_mode none --host 0.0.0.0
+   ```
 
-### How It Works
+2. **Subsequent Runs:**
+   ```bash
+   # start.sh just launches SwarmUI
+   ./launch-linux.sh --launch_mode none --host 0.0.0.0
+   ```
+
+3. **SwarmUI Handles:**
+   - Building itself if needed
+   - Installing ComfyUI backend if needed
+   - Starting ComfyUI backend automatically
+   - Managing all dependencies
+
+4. **We Just:**
+   - Wait for SwarmUI to be ready
+   - Wait for ComfyUI backend to start
+   - Handle generation requests
+
+**Why This Is Better:**
+- ✅ Uses tested, official installation process
+- ✅ Automatically gets SwarmUI updates
+- ✅ ComfyUI managed by SwarmUI (proper integration)
+- ✅ Less custom code = fewer bugs
+- ✅ Easier to maintain and update
+
+### Architecture Flow
 
 ```mermaid
-flowchart LR
-    A[RunPod Endpoint] -->|starts| B[Container]
-    B -->|runs| C[start.sh]
-    C -->|checks| D{SwarmUI on volume?}
-    D -->|no| E[Clone SwarmUI]
-    D -->|yes| F[Use existing]
-    E --> G[launch-linux.sh]
-    F --> G
-    G -->|builds & installs| H[SwarmUI + ComfyUI]
-    H --> I[Start Server]
-    I --> J[Handler waits]
-    J --> K[Accept requests]
+sequenceDiagram
+    participant Container
+    participant StartScript as start.sh
+    participant SwarmUI
+    participant ComfyUI
+    participant Handler as rp_handler.py
+    participant RunPod
+
+    Container->>StartScript: Launch
+    StartScript->>StartScript: Check if SwarmUI exists
+    
+    alt First Run
+        StartScript->>SwarmUI: Download install-linux.sh
+        StartScript->>SwarmUI: Run installer
+        SwarmUI->>SwarmUI: Clone, build, setup
+    end
+    
+    StartScript->>SwarmUI: ./launch-linux.sh
+    SwarmUI->>SwarmUI: Build if needed
+    SwarmUI->>ComfyUI: Install if needed
+    SwarmUI->>ComfyUI: Start backend
+    ComfyUI-->>SwarmUI: Ready
+    
+    Handler->>SwarmUI: Poll for ready
+    SwarmUI-->>Handler: Ready
+    Handler->>ComfyUI: Check backend status
+    ComfyUI-->>Handler: Running
+    
+    Handler->>RunPod: Worker ready
+    RunPod->>Handler: Generation request
+    Handler->>SwarmUI: Generate image
+    SwarmUI->>ComfyUI: Execute workflow
+    ComfyUI-->>SwarmUI: Image result
+    SwarmUI-->>Handler: Image path
+    Handler->>SwarmUI: Fetch image
+    SwarmUI-->>Handler: Image data
+    Handler-->>RunPod: Base64 result
 ```
-
-**Key Point**: We use SwarmUI's **own** `launch-linux.sh` script which handles everything:
-- Building SwarmUI (if needed)
-- Installing ComfyUI backend automatically (if needed)
-- Starting the server
-
-This is much simpler and more reliable than custom installation logic!
 
 ### Network Volume Layout
 
 ```
 /runpod-volume/
-├── SwarmUI/              # Full installation
-│   ├── bin/              # Built binaries
-│   ├── Data/             # Settings
-│   ├── dlbackend/        # ComfyUI backend
-│   │   └── comfy/ComfyUI/
-│   ├── Models/           # Symlink to volume
-│   └── Output/           # Symlink to volume
-├── Models/               # Persistent models
+├── SwarmUI/                    # Installed by install-linux.sh
+│   ├── launch-linux.sh         # Official launcher
+│   ├── src/                    # SwarmUI source
+│   ├── bin/                    # Built binaries
+│   ├── Data/                   # Settings
+│   ├── dlbackend/              # ComfyUI (installed by SwarmUI)
+│   │   └── ComfyUI/
+│   ├── Models -> ../Models/    # Symlink to volume
+│   └── Output -> ../Output/    # Symlink to volume
+├── Models/                     # Persistent models
 │   ├── Stable-Diffusion/
 │   ├── Loras/
 │   └── VAE/
-└── Output/               # Generated images
+└── Output/                     # Generated images
 ```
+
+---
+
+## 📖 Documentation
+
+- **[Quick Start](docs/QUICKSTART.md)** – Get running in 15 minutes
+- **[Setup Guide](docs/SETUP.md)** – Detailed deployment instructions
+- **[Architecture](docs/ARCHITECTURE.md)** – Technical design
+- **[Troubleshooting](docs/TROUBLESHOOTING.md)** – Common issues
 
 ---
 
 ## 💰 Cost Estimate
 
-### GPU Costs (per hour)
-- RTX 4090: $0.68/hour
-- A100 40GB: $2.48/hour
-- A100 80GB: $3.56/hour
+### GPU Costs
+- RTX 4090 (24GB): $0.68/hour
+- A100 (40GB): $2.48/hour
+- A100 (80GB): $3.56/hour
 
-### Storage Costs (per month)
-- 50GB: $3.50/month
-- 100GB: $7.00/month
-- 500GB: $35.00/month
+### Storage
+- 100GB network volume: $7/month
 
 ### Example Usage
 ```
-RTX 4090 (24GB) + 100GB storage
-
-Generation time: 10 seconds per image
-Daily usage: 100 images = ~17 minutes
-Monthly GPU cost: ~$6
-Monthly storage: $7
-Total: ~$13/month
+RTX 4090 + 100GB storage
+10 seconds per image
+100 images/day = 17 minutes/day
+Monthly: ~$6 GPU + $7 storage = $13/month
 
 With 0 active workers: No idle costs!
 ```
@@ -230,14 +209,17 @@ With 0 active workers: No idle costs!
 
 ### Environment Variables
 
-See `.env.example` for all options:
-
 ```bash
+# SwarmUI Server
 SWARMUI_HOST=0.0.0.0
 SWARMUI_PORT=7801
+
+# Network Volume
 VOLUME_PATH=/runpod-volume
-GENERATION_TIMEOUT=600
-STARTUP_TIMEOUT=900
+
+# Timeouts
+STARTUP_TIMEOUT=1800      # 30 min for first install
+GENERATION_TIMEOUT=600    # 10 min per generation
 ```
 
 ### API Input Format
@@ -246,7 +228,7 @@ STARTUP_TIMEOUT=900
 {
   "input": {
     "prompt": "a beautiful landscape",
-    "negative_prompt": "low quality",
+    "negative_prompt": "low quality, blurry",
     "model": "OfficialStableDiffusion/sd_xl_base_1.0",
     "width": 1024,
     "height": 1024,
@@ -267,20 +249,54 @@ STARTUP_TIMEOUT=900
       {
         "filename": "image.png",
         "type": "base64",
-        "data": "iVBORw0KGgoAAAANS..."
+        "data": "iVBORw0KGgo..."
       }
     ],
     "parameters": {
       "prompt": "a beautiful landscape",
-      "model": "OfficialStableDiffusion/sd_xl_base_1.0",
+      "model": "...",
       "seed": 1234567890,
       "width": 1024,
-      "height": 1024,
-      "steps": 30,
-      "cfg_scale": 7.5
+      "height": 1024
     }
   }
 }
+```
+
+---
+
+## 🔍 Troubleshooting
+
+### First Start Taking Too Long?
+
+**This is normal!** First installation takes 15-20 minutes:
+- SwarmUI download and build: 5 minutes
+- ComfyUI installation: 5-10 minutes
+- Python dependencies: 2-5 minutes
+
+**Watch the logs** to see progress.
+
+### "Service Not Ready" Error?
+
+Wait 60-90 seconds for cold start. The worker needs to:
+1. Start SwarmUI server (30s)
+2. Start ComfyUI backend (30-60s)
+3. Load models to VRAM (if used before)
+
+### Models Not Found?
+
+Upload models to the network volume:
+```bash
+# Start a GPU Pod with your network volume
+# Models go in: /workspace/Models/Stable-Diffusion/
+# (network volume mounts at /workspace in Pods)
+```
+
+### Want to Use a Specific SwarmUI Version?
+
+Edit `scripts/start.sh` and change the version:
+```bash
+wget https://github.com/mcmonkeyprojects/SwarmUI/releases/download/VERSION/install-linux.sh
 ```
 
 ---
@@ -289,75 +305,54 @@ STARTUP_TIMEOUT=900
 
 ```
 runpod-swarmui-serverless/
-├── Dockerfile                    # Container definition
-├── scripts/start.sh              # SwarmUI installer
-├── src/rp_handler.py             # RunPod handler
-├── builder/requirements.txt      # Python deps
-├── tests/                        # Test scripts
-├── docs/                         # Documentation
-├── .github/workflows/            # CI/CD
-└── README.md                     # This file
+├── Dockerfile              # Container with prereqs only
+├── scripts/
+│   └── start.sh           # Downloads and runs SwarmUI installers
+├── src/
+│   └── rp_handler.py      # RunPod handler (waits for ready, generates)
+├── builder/
+│   └── requirements.txt   # Python deps (runpod, requests)
+├── tests/
+│   └── test_endpoint.py   # Test script
+└── docs/                  # Documentation
 ```
 
-See [FILE_STRUCTURE.md](FILE_STRUCTURE.md) for complete details.
-
----
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-**Issue**: First start takes too long
-- **Expected**: 20-30 minutes for first installation
-- **Solution**: Be patient, subsequent starts are 60-90s
-
-**Issue**: "Service not ready"
-- **Cause**: SwarmUI still starting up
-- **Solution**: Wait 60-90 seconds for cold start
-
-**Issue**: "Network volume not mounted"
-- **Cause**: No network volume attached
-- **Solution**: Attach network volume in endpoint settings
-
-**Issue**: "Model not found"
-- **Cause**: Model not on network volume
-- **Solution**: Upload models to `/runpod-volume/Models/Stable-Diffusion/`
-
-See [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for complete guide.
+**Key Philosophy:** Let SwarmUI do what it does best. We just provide the environment and wait for it to be ready.
 
 ---
 
 ## 🤝 Contributing
 
-Contributions welcome! Please:
-1. Read the code - it's production quality with best practices
-2. Follow the existing code style
-3. Test your changes thoroughly
-4. Submit a PR with clear description
+This project follows best practices:
+- Uses official installation methods (no custom hacks)
+- Minimal custom code (easier to maintain)
+- Well-documented and tested
+- Professional error handling
+
+Contributions welcome! Please maintain this philosophy.
 
 ---
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE)
 
 ---
 
 ## 🙏 Acknowledgments
 
-- **SwarmUI Team** – For the amazing UI and API
+- **SwarmUI Team** – For excellent installation scripts and API
 - **ComfyUI Team** – For the powerful backend
 - **RunPod** – For the serverless platform
-- **Community** – For feedback and testing
 
 ---
 
 ## 📞 Support
 
 - **GitHub Issues**: [Report bugs](https://github.com/YOUR_USERNAME/runpod-swarmui-serverless/issues)
-- **SwarmUI Discord**: [Join here](https://discord.gg/q2y38cqjNw)
-- **RunPod Discord**: [Join here](https://discord.gg/runpod)
+- **SwarmUI Discord**: [Join](https://discord.gg/q2y38cqjNw)
+- **RunPod Discord**: [Join](https://discord.gg/runpod)
 
 ---
 
-**Ready to deploy?** Follow the [Quick Start](#quick-start) above! 🚀
+**Ready to deploy?** Just create a network volume, deploy the endpoint, and wait for the first installation. That's it! 🚀

@@ -1,6 +1,7 @@
 ﻿"""RunPod Handler for SwarmUI Serverless Worker.
 
-Enhanced version that waits for ComfyUI backend installation and readiness.
+Simplified version that uses SwarmUI's built-in installation and backend management.
+SwarmUI's launch-linux.sh handles ComfyUI installation automatically.
 """
 
 import os
@@ -8,17 +9,14 @@ import time
 import base64
 import requests
 import runpod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # Configuration
 SWARMUI_API_URL = os.getenv('SWARMUI_API_URL', 'http://127.0.0.1:7801')
 GENERATION_TIMEOUT = int(os.getenv('GENERATION_TIMEOUT', '600'))
-SERVICE_WAIT_INTERVAL = int(os.getenv('SERVICE_WAIT_INTERVAL', '10'))
-BACKEND_WAIT_INTERVAL = int(os.getenv('BACKEND_WAIT_INTERVAL', '15'))
-STARTUP_TIMEOUT = int(os.getenv('STARTUP_TIMEOUT', '1800'))  # 30 min for first install
-MAX_RETRY_ATTEMPTS = max(1, STARTUP_TIMEOUT // max(1, SERVICE_WAIT_INTERVAL))
+STARTUP_TIMEOUT = int(os.getenv('STARTUP_TIMEOUT', '1800'))
 
 # Setup session with retries
 session = requests.Session()
@@ -29,203 +27,127 @@ retries = Retry(
     allowed_methods=["GET", "POST"]
 )
 session.mount('http://', HTTPAdapter(max_retries=retries))
-session.mount('https://', HTTPAdapter(max_retries=retries))
 
 
-def wait_for_service(url: str, max_attempts: int = MAX_RETRY_ATTEMPTS) -> bool:
-    """Wait for SwarmUI service to become available.
+def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
+    """Wait for SwarmUI server and ComfyUI backend to be fully ready.
+    
+    SwarmUI's launch-linux.sh automatically installs and starts ComfyUI.
+    We just need to wait until the backend is running.
     
     Args:
-        url: The base URL of the SwarmUI service
-        max_attempts: Maximum number of attempts to check
+        max_wait_seconds: Maximum time to wait
         
     Returns:
-        bool: True if service is ready, False otherwise
+        bool: True if ready, False if timeout
     """
     print("=" * 80)
-    print("STEP 1: Waiting for SwarmUI Service")
+    print("Waiting for SwarmUI and ComfyUI Backend")
     print("=" * 80)
-    print(f"Target: {url}")
-    print(f"Max wait: {STARTUP_TIMEOUT}s ({max_attempts} attempts @ {SERVICE_WAIT_INTERVAL}s)")
-    print()
-
-    for attempt in range(max_attempts):
+    print(f"Target: {SWARMUI_API_URL}")
+    print(f"Max wait: {max_wait_seconds}s")
+    print("")
+    print("First run: 10-20 minutes (SwarmUI build + ComfyUI installation)")
+    print("Subsequent runs: 30-90 seconds (just startup)")
+    print("=" * 80)
+    print("")
+    
+    start_time = time.time()
+    check_interval = 10
+    last_status = None
+    
+    while time.time() - start_time < max_wait_seconds:
+        elapsed = int(time.time() - start_time)
+        
         try:
+            # Try to get a session - this is the simplest health check
             response = session.post(
-                f"{url}/API/GetNewSession",
+                f"{SWARMUI_API_URL}/API/GetNewSession",
                 json={},
                 timeout=10
             )
             
             if response.status_code == 200:
                 data = response.json()
-                if 'session_id' in data:
-                    print(f"✓ SwarmUI service is ready!")
-                    print(f"  Version: {data.get('version', 'unknown')}")
-                    print(f"  Server ID: {data.get('server_id', 'unknown')}")
-                    return True
-            
-        except requests.exceptions.RequestException as e:
-            elapsed = attempt * SERVICE_WAIT_INTERVAL
-            print(f"  [{elapsed:4d}s] Waiting... ({type(e).__name__})")
-            
-        except Exception as e:
-            print(f"  Unexpected error: {e}")
-        
-        if attempt < max_attempts - 1:
-            time.sleep(SERVICE_WAIT_INTERVAL)
-    
-    print(f"ERROR: SwarmUI service failed to start after {STARTUP_TIMEOUT}s")
-    return False
-
-
-def wait_for_backend(url: str, max_wait_seconds: int = 1200) -> bool:
-    """Wait for at least one backend to be available.
-    
-    ComfyUI backend may take 5-15 minutes to install on first run.
-    
-    Args:
-        url: The base URL of the SwarmUI service
-        max_wait_seconds: Maximum seconds to wait for backend
-        
-    Returns:
-        bool: True if backend is ready, False otherwise
-    """
-    print()
-    print("=" * 80)
-    print("STEP 2: Waiting for ComfyUI Backend Installation & Startup")
-    print("=" * 80)
-    print("This may take 5-15 minutes on first run (ComfyUI installation)")
-    print("Subsequent runs should be ready in 30-90 seconds")
-    print()
-    
-    start_time = time.time()
-    max_attempts = max_wait_seconds // BACKEND_WAIT_INTERVAL
-    
-    for attempt in range(max_attempts):
-        elapsed = int(time.time() - start_time)
-        
-        try:
-            # CRITICAL: Must get session_id first - required for ALL SwarmUI API calls
-            session_resp = session.post(
-                f"{url}/API/GetNewSession",
-                json={},
-                timeout=10
-            )
-            
-            if session_resp.status_code != 200:
-                print(f"  [{elapsed:4d}s] Cannot get session...")
-                time.sleep(BACKEND_WAIT_INTERVAL)
-                continue
-            
-            session_id = session_resp.json().get('session_id')
-            if not session_id:
-                print(f"  [{elapsed:4d}s] No session ID received...")
-                time.sleep(BACKEND_WAIT_INTERVAL)
-                continue
-            
-            # Now use session_id to list backends
-            response = session.post(
-                f"{url}/API/ListBackends",
-                json={"session_id": session_id},
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    backends = data.get('backends', [])
-                    
-                    # Look for enabled and running backends
-                    available_backends = [
-                        b for b in backends 
-                        if b.get('status') in ['running', 'ready', 'loaded']
-                    ]
-                    
-                    if available_backends:
-                        print()
-                        print(f"✓ Backend ready after {elapsed}s!")
-                        print(f"  Available backends: {len(available_backends)}")
-                        for backend in available_backends:
-                            print(f"    - {backend.get('title', 'Unknown')}: {backend.get('status')}")
-                        return True
-                    
-                    # Show status of all backends
-                    if backends:
-                        status_msg = ", ".join([
-                            f"{b.get('title', 'Unknown')}: {b.get('status', 'unknown')}"
-                            for b in backends
-                        ])
-                        print(f"  [{elapsed:4d}s] {status_msg}")
-                    else:
-                        print(f"  [{elapsed:4d}s] No backends configured yet...")
-                        
-                except (ValueError, KeyError) as e:
-                    print(f"  [{elapsed:4d}s] Backend API returned invalid data, retrying...")
-                    
-            elif response.status_code == 400:
-                # Bad request - try test generation to check backend
-                print(f"  [{elapsed:4d}s] ListBackends unavailable, trying test generation...")
+                session_id = data.get('session_id')
                 
-                try:
-                    # Try a minimal test generation to see if backend responds
-                    test_gen = session.post(
-                        f"{url}/API/GenerateText2Image",
-                        json={
-                            "session_id": session_id,
-                            "prompt": "test",
-                            "model": "OfficialStableDiffusion/sd_xl_base_1.0",
-                            "images": 0,  # Don't actually generate
-                            "width": 512,
-                            "height": 512,
-                            "steps": 1
-                        },
+                if session_id:
+                    # SwarmUI is responding, now check if backend is ready
+                    backend_response = session.post(
+                        f"{SWARMUI_API_URL}/API/ListBackends",
+                        json={"session_id": session_id},
                         timeout=10
                     )
                     
-                    if test_gen.status_code == 200:
-                        result = test_gen.json()
-                        error = result.get('error', '')
+                    if backend_response.status_code == 200:
+                        backends = backend_response.json().get('backends', [])
                         
-                        if 'No backends available' in str(error):
-                            print(f"  [{elapsed:4d}s] Backend still installing...")
-                        elif error and 'backend' not in str(error).lower():
-                            # Some other error means backend exists
-                            print(f"✓ Backend ready after {elapsed}s! (detected via test)")
+                        # Check for running backends
+                        running_backends = [
+                            b for b in backends 
+                            if b.get('status') in ['running', 'ready', 'loaded']
+                        ]
+                        
+                        if running_backends:
+                            print("")
+                            print("=" * 80)
+                            print(f"✓ System Ready! (took {elapsed}s)")
+                            print("=" * 80)
+                            print(f"SwarmUI Version: {data.get('version', 'unknown')}")
+                            print(f"Available Backends: {len(running_backends)}")
+                            for backend in running_backends:
+                                print(f"  - {backend.get('title', 'Unknown')}: {backend.get('status')}")
+                            print("=" * 80)
                             return True
-                        elif not error:
-                            print(f"✓ Backend ready after {elapsed}s!")
-                            return True
-                            
-                except Exception:
-                    pass  # Ignore errors in fallback check
-                    
+                        
+                        # Show backend status
+                        if backends:
+                            status_msg = ", ".join([
+                                f"{b.get('title', 'Unknown')}: {b.get('status', 'unknown')}"
+                                for b in backends
+                            ])
+                            if status_msg != last_status:
+                                print(f"[{elapsed:4d}s] Backends: {status_msg}")
+                                last_status = status_msg
+                        else:
+                            if last_status != "installing":
+                                print(f"[{elapsed:4d}s] SwarmUI ready, waiting for ComfyUI installation...")
+                                last_status = "installing"
+                    else:
+                        # Backend API not ready yet
+                        if last_status != "swarmui_starting":
+                            print(f"[{elapsed:4d}s] SwarmUI starting, backends not ready yet...")
+                            last_status = "swarmui_starting"
             else:
-                print(f"  [{elapsed:4d}s] ListBackends returned {response.status_code}")
-            
-        except requests.exceptions.RequestException as e:
-            print(f"  [{elapsed:4d}s] Checking backends... ({type(e).__name__})")
+                # SwarmUI not responding yet
+                if last_status != "waiting":
+                    print(f"[{elapsed:4d}s] Waiting for SwarmUI server...")
+                    last_status = "waiting"
+                    
+        except requests.exceptions.RequestException:
+            if last_status != "connecting":
+                print(f"[{elapsed:4d}s] Connecting to SwarmUI...")
+                last_status = "connecting"
         except Exception as e:
-            print(f"  [{elapsed:4d}s] Error: {type(e).__name__}")
+            print(f"[{elapsed:4d}s] Unexpected error: {type(e).__name__}")
         
-        if elapsed >= max_wait_seconds:
-            break
-            
-        time.sleep(BACKEND_WAIT_INTERVAL)
+        time.sleep(check_interval)
     
-    print()
-    print(f"ERROR: No backends available after {max_wait_seconds}s")
-    print()
+    print("")
+    print("=" * 80)
+    print(f"ERROR: System not ready after {max_wait_seconds}s")
+    print("=" * 80)
+    print("")
     print("Troubleshooting:")
-    print("  1. Check SwarmUI logs for backend installation errors")
-    print("  2. First run needs 5-15 minutes for ComfyUI installation")
-    print("  3. Ensure sufficient disk space (15GB+ for container)")
-    print("  4. Verify Settings.fds has backend configuration")
+    print("  1. Check container logs for errors")
+    print("  2. First run needs 10-20 minutes for full installation")
+    print("  3. Ensure network volume has sufficient space (50GB+)")
+    print("  4. Verify .NET 8 SDK and Python 3.11 are installed")
     return False
 
 
 def get_session_id() -> Optional[str]:
-    """Request a new SwarmUI session identifier.
+    """Get a SwarmUI session ID.
     
     Returns:
         str: Session ID if successful, None otherwise
@@ -238,34 +160,30 @@ def get_session_id() -> Optional[str]:
         )
         response.raise_for_status()
         
-        data = response.json()
-        session_id = data.get("session_id")
-        
+        session_id = response.json().get("session_id")
         if session_id:
-            print(f"✓ Obtained session ID: {session_id[:16]}...")
+            print(f"✓ Session ID: {session_id[:16]}...")
             return session_id
-        else:
-            print("ERROR: No session_id in response")
-            return None
-            
+        
+        print("ERROR: No session_id in response")
+        return None
+        
     except Exception as e:
-        print(f"ERROR: Failed to get session ID: {e}")
+        print(f"ERROR: Failed to get session: {e}")
         return None
 
 
 def fetch_image_as_base64(image_path: str) -> Optional[Dict[str, str]]:
-    """Fetch an image from SwarmUI and convert to base64.
+    """Fetch image from SwarmUI and encode as base64.
     
     Args:
         image_path: Path returned by SwarmUI API
         
     Returns:
-        dict: Image data with filename, type, and base64 data, or None if failed
+        dict: Image data with filename and base64 encoding
     """
     try:
         img_url = f"{SWARMUI_API_URL}/{image_path}"
-        print(f"Fetching image from: {img_url}")
-        
         response = session.get(img_url, timeout=30)
         response.raise_for_status()
         
@@ -279,20 +197,20 @@ def fetch_image_as_base64(image_path: str) -> Optional[Dict[str, str]]:
         }
         
     except Exception as e:
-        print(f"ERROR: Failed to fetch image from {image_path}: {e}")
+        print(f"ERROR: Failed to fetch image {image_path}: {e}")
         return None
 
 
 def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate an image using SwarmUI API.
+    """Generate image using SwarmUI API.
     
     Args:
-        job_input: Dictionary containing generation parameters
+        job_input: Generation parameters
         
     Returns:
-        dict: Generation result with images or error
+        dict: Result with images or error
     """
-    # Get session ID
+    # Get session
     session_id = get_session_id()
     if not session_id:
         return {"error": "Failed to create SwarmUI session"}
@@ -308,7 +226,7 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
     seed = int(job_input.get('seed', -1))
     images_count = int(job_input.get('images', 1))
     
-    # Build SwarmUI API request
+    # Build request
     swarm_request = {
         "session_id": session_id,
         "prompt": prompt,
@@ -323,17 +241,18 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
         "donotsave": False
     }
     
-    print()
+    print("")
     print("=" * 80)
-    print("STEP 3: Generating Image")
+    print("Generating Image")
     print("=" * 80)
-    print(f"Prompt: '{prompt[:60]}...'")
+    print(f"Prompt: {prompt[:60]}{'...' if len(prompt) > 60 else ''}")
     print(f"Model: {model}")
     print(f"Size: {width}x{height}, Steps: {steps}, CFG: {cfg_scale}")
-    print()
+    print("=" * 80)
+    print("")
     
     try:
-        # Send generation request
+        # Generate
         response = session.post(
             f"{SWARMUI_API_URL}/API/GenerateText2Image",
             json=swarm_request,
@@ -343,26 +262,24 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
         
         result = response.json()
         
-        # Check for errors in response
+        # Check for errors
         if 'error' in result or 'error_id' in result:
             error_msg = result.get('error', result.get('error_id', 'Unknown error'))
-            print(f"ERROR: SwarmUI returned error: {error_msg}")
+            print(f"ERROR: SwarmUI error: {error_msg}")
             return {"error": error_msg}
         
-        # Extract image paths from response
+        # Fetch images
         if 'images' in result and len(result['images']) > 0:
-            print(f"✓ Generation complete, fetching {len(result['images'])} image(s)...")
+            print(f"✓ Generated {len(result['images'])} image(s), fetching...")
             
             images = []
             for img_path in result['images']:
                 img_data = fetch_image_as_base64(img_path)
                 if img_data:
                     images.append(img_data)
-                else:
-                    print(f"WARNING: Failed to fetch image: {img_path}")
             
-            if len(images) == 0:
-                return {"error": "Failed to fetch any generated images"}
+            if not images:
+                return {"error": "Failed to fetch generated images"}
             
             print(f"✓ Successfully returned {len(images)} image(s)")
             
@@ -380,43 +297,39 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
                 }
             }
         
-        print("ERROR: No images in SwarmUI response")
-        return {"error": "No images generated by SwarmUI"}
+        print("ERROR: No images in response")
+        return {"error": "No images generated"}
         
     except requests.exceptions.Timeout:
-        return {"error": f"Generation request timed out after {GENERATION_TIMEOUT}s"}
-    except requests.exceptions.RequestException as e:
-        return {"error": f"Request failed: {str(e)}"}
+        return {"error": f"Generation timeout after {GENERATION_TIMEOUT}s"}
     except Exception as e:
-        return {"error": f"Unexpected error: {str(e)}"}
+        return {"error": f"Generation failed: {str(e)}"}
 
 
 def handler(job: Dict[str, Any]) -> Dict[str, Any]:
-    """RunPod handler function - entry point for all requests.
+    """RunPod handler - entry point for all requests.
     
     Args:
-        job: Dictionary containing job input and metadata
+        job: Job data with input parameters
         
     Returns:
         dict: Result or error
     """
     try:
-        print()
+        print("")
         print("=" * 80)
-        print("SwarmUI RunPod Serverless - Processing Request")
+        print("SwarmUI RunPod Serverless - New Request")
         print("=" * 80)
         
         job_input = job.get('input', {})
-        
         if not job_input:
             return {"error": "No input provided"}
         
-        # Generate image
         result = generate_image(job_input)
         
-        print()
+        print("")
         print("=" * 80)
-        print("✓ Request Completed")
+        print("✓ Request Complete")
         print("=" * 80)
         
         return result
@@ -426,31 +339,26 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Handler error: {str(e)}"}
 
 
-# Initialize - wait for SwarmUI AND backend to be ready
+# Initialize - wait for SwarmUI and ComfyUI to be ready
 if __name__ == "__main__":
+    print("")
     print("=" * 80)
-    print("SwarmUI RunPod Serverless Worker - Initialization")
+    print("SwarmUI RunPod Serverless Worker")
     print("=" * 80)
-    print()
+    print("")
     
-    # Step 1: Wait for SwarmUI server to start
-    if not wait_for_service(SWARMUI_API_URL):
-        print()
-        print("FATAL: SwarmUI service failed to start")
+    if not wait_for_swarmui_ready():
+        print("")
+        print("FATAL: SwarmUI failed to start")
+        print("Check container logs for details")
         exit(1)
     
-    # Step 2: Wait for ComfyUI backend to install and start
-    if not wait_for_backend(SWARMUI_API_URL):
-        print()
-        print("FATAL: No backends available after timeout")
-        print("Check container logs for installation errors")
-        exit(1)
-    
-    print()
+    print("")
     print("=" * 80)
-    print("✓ System Ready - Starting RunPod Handler")
+    print("Starting RunPod Handler")
     print("=" * 80)
-    print()
+    print("Ready to accept generation requests")
+    print("=" * 80)
+    print("")
     
     runpod.serverless.start({"handler": handler})
-    
