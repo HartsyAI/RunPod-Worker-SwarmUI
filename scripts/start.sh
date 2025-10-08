@@ -1,5 +1,7 @@
 ﻿#!/bin/bash
-# SwarmUI Startup - Uses official SwarmUI installation scripts
+# SwarmUI Startup Script - Uses Official SwarmUI Scripts
+# No manual building or installation - let SwarmUI handle it!
+
 set -e
 
 echo "=============================================================================="
@@ -16,35 +18,31 @@ echo "Volume Path: $VOLUME_PATH"
 echo "SwarmUI Path: $SWARMUI_PATH"
 echo "=============================================================================="
 
-# Verify network volume is mounted
+# Check if network volume is mounted
 if [ ! -d "$VOLUME_PATH" ]; then
     echo "ERROR: Network volume not mounted at $VOLUME_PATH"
-    echo "Please attach a RunPod network volume to this endpoint"
     exit 1
 fi
 
 echo "✓ Network volume detected"
 
-# First-time installation using official SwarmUI installer
+# ============================================================================== 
+# First-Time Installation
+# ============================================================================== 
 if [ ! -d "$SWARMUI_PATH" ]; then
     echo "=============================================================================="
     echo "First-Time Setup: Installing SwarmUI"
     echo "=============================================================================="
-    echo "This will take 10-20 minutes (download, build, ComfyUI installation)"
-    echo ""
     
     cd "$VOLUME_PATH"
     
-    # Download official installer
+    # Download SwarmUI install script
     echo "Downloading SwarmUI installer..."
     wget -q https://github.com/mcmonkeyprojects/SwarmUI/releases/download/0.6.5-Beta/install-linux.sh -O install-linux.sh
     chmod +x install-linux.sh
     
-    echo "Running SwarmUI installer..."
-    echo "(This installs SwarmUI and will prompt for ComfyUI installation)"
-    echo ""
-    
-    # Run installer - it will create the SwarmUI directory
+    # Run SwarmUI installer
+    echo "Running SwarmUI installer (this will clone and setup SwarmUI)..."
     ./install-linux.sh
     
     if [ ! -d "$SWARMUI_PATH" ]; then
@@ -52,60 +50,65 @@ if [ ! -d "$SWARMUI_PATH" ]; then
         exit 1
     fi
     
-    echo ""
     echo "✓ SwarmUI installed successfully"
     
-    # Create Models and Output directories on volume
-    mkdir -p "$VOLUME_PATH/Models/Stable-Diffusion"
-    mkdir -p "$VOLUME_PATH/Models/Loras"
-    mkdir -p "$VOLUME_PATH/Models/VAE"
-    mkdir -p "$VOLUME_PATH/Output"
+    # Install ComfyUI Backend
+    echo "=============================================================================="
+    echo "Installing ComfyUI Backend"
+    echo "=============================================================================="
     
-    # Symlink to volume storage
     cd "$SWARMUI_PATH"
-    rm -rf Models Output 2>/dev/null || true
-    ln -sf "$VOLUME_PATH/Models" Models
-    ln -sf "$VOLUME_PATH/Output" Output
     
-    echo "✓ Storage directories configured"
+    if [ -f "launchtools/comfy-install-linux.sh" ]; then
+        echo "Running ComfyUI installer..."
+        chmod +x launchtools/comfy-install-linux.sh
+        
+        # Run with 'nv' for NVIDIA GPUs
+        bash launchtools/comfy-install-linux.sh nv
+        
+        if [ $? -eq 0 ]; then
+            echo "✓ ComfyUI installed successfully"
+        else
+            echo "ERROR: ComfyUI installation failed"
+            exit 1
+        fi
+    else
+        echo "ERROR: ComfyUI installer not found at launchtools/comfy-install-linux.sh"
+        exit 1
+    fi
+    
 else
-    echo "✓ SwarmUI found at $SWARMUI_PATH"
-    
-    # Ensure symlinks exist
-    cd "$SWARMUI_PATH"
-    if [ ! -L "Models" ]; then
-        rm -rf Models 2>/dev/null || true
-        ln -sf "$VOLUME_PATH/Models" Models
-    fi
-    if [ ! -L "Output" ]; then
-        rm -rf Output 2>/dev/null || true
-        ln -sf "$VOLUME_PATH/Output" Output
-    fi
+    echo "✓ SwarmUI already installed"
 fi
 
-# Launch SwarmUI using official launch script
+# ============================================================================== 
+# Launch SwarmUI Using Official Script
+# ============================================================================== 
 echo "=============================================================================="
-echo "Launching SwarmUI Server"
+echo "Starting SwarmUI Server"
 echo "=============================================================================="
-echo "Using official launch-linux.sh script"
-echo "This will:"
-echo "  - Build SwarmUI if needed"
-echo "  - Install ComfyUI backend if needed (first run: 5-10 minutes)"
-echo "  - Start SwarmUI server on $SWARMUI_HOST:$SWARMUI_PORT"
-echo "  - Auto-start ComfyUI backend"
-echo "=============================================================================="
-echo ""
 
 cd "$SWARMUI_PATH"
 
-# Make sure launch script is executable
+# Verify launch script exists
+if [ ! -f "launch-linux.sh" ]; then
+    echo "ERROR: launch-linux.sh not found in $SWARMUI_PATH"
+    echo "SwarmUI installation may be corrupted"
+    exit 1
+fi
+
 chmod +x launch-linux.sh
 
-# Launch SwarmUI with serverless-friendly settings
+echo "Server: $SWARMUI_HOST:$SWARMUI_PORT"
+echo "Using SwarmUI's launch-linux.sh script"
+echo "=============================================================================="
+echo ""
+
+# Start SwarmUI with official launch script
 # --launch_mode none: Don't open browser
-# --host 0.0.0.0: Listen on all interfaces for RunPod routing
-# --port: Our configured port
+# --host 0.0.0.0: Listen on all interfaces
+# --port: Custom port
 exec ./launch-linux.sh \
     --launch_mode none \
     --host "$SWARMUI_HOST" \
-    --port "$SWARMUI_PORT"
+    --port "$SWARMUI_PORT" 2>&1
