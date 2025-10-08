@@ -1,197 +1,104 @@
-# Deployment Checklist - SwarmUI RunPod Serverless
+# Deployment Checklist – RunPod Worker SwarmUI
 
-Complete checklist for deploying SwarmUI on RunPod Serverless.
-
-## Prerequisites
-
-- [ ] RunPod account created
-- [ ] Credit added to RunPod account (minimum $10)
-- [ ] Docker Hub account (for custom builds)
-- [ ] GitHub account (optional, for GitHub deployment)
-
-## File Structure Checklist
-
-Your repository should have these files:
-
-```
-runpod-swarmui-serverless/
-├── README.md                      # Landing page
-├── Dockerfile                     # Container build instructions
-├── start.sh                       # SwarmUI bootstrap script
-├── src/
-│   └── rp_handler.py             # RunPod handler (entry point)
-├── builder/
-│   └── requirements.txt          # Python dependencies for handler
-├── test_input.json                # Sample payload for local tests
-├── test_endpoint.py               # RunPod endpoint tester
-├── docs/
-│   ├── QUICKSTART.md             # Condensed deployment steps
-│   ├── SETUP.md                  # Detailed setup & troubleshooting
-│   └── DEPLOYMENT_CHECKLIST.md   # This checklist
-├── LICENSE                        # MIT license
-├── .gitignore                     # Git ignore file
-├── .runpodignore                  # Files excluded from builds
-└── (optional)
-    ├── .env.example              # Example environment variables
-    └── .github/workflows/*       # CI/CD automation
-```
-
-## Network Volume Setup
-
-### Step 1: Create Network Volume
-
-- [ ] Navigate to [RunPod Storage](https://runpod.io/console/storage)
-- [ ] Click "+ New Network Volume"
-- [ ] Configure:
-  - Name: `swarmui-models`
-  - Size: 100GB minimum (500GB recommended)
-  - Datacenter: Choose based on GPU availability
-- [ ] Click "Create"
-- [ ] Wait for provisioning (~1 minute)
-
-### Step 2: Upload Models (Optional but Recommended)
-
-**Option A: Using a Temporary Pod**
-- [ ] Go to GPU Cloud → Deploy Pod
-- [ ] Select any GPU with your network volume attached
-- [ ] Connect via SSH
-- [ ] Navigate to `/workspace` (network volume mount point in Pods)
-- [ ] Create directory structure:
-  ```bash
-  mkdir -p Models/Stable-Diffusion
-  mkdir -p Models/Loras
-  mkdir -p Models/VAE
-  ```
-- [ ] Upload models:
-  ```bash
-  cd Models/Stable-Diffusion
-  wget https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors
-  ```
-- [ ] Terminate Pod when done
-
-**Option B: Let First Run Download** (slower)
-- [ ] SwarmUI will auto-install ComfyUI on first run
-- [ ] Models can be downloaded through SwarmUI UI later
-
-## Docker Image Build
-
-### Option 1: GitHub Actions (Recommended)
-
-- [ ] Fork this repository
-- [ ] Add GitHub Secrets:
-  - `DOCKERHUB_USERNAME`: Your Docker Hub username
-- [ ] GitHub Actions will automatically build and push
-
-### Option 2: Manual Build
-
-- [x] Clone repository locally
-- [x] Build image:
-  ```bash
-  docker build --platform linux/amd64 -t yourusername/swarmui-runpod:latest .
-  ```
-- [ ] Push to Docker Hub:
-  ```bash
-  docker push yourusername/swarmui-runpod:latest
-  ```
-{{ ... }}
-
-- [x] Open local SwarmUI
-- [x] Go to Server → Backends
-- [x] Click "Add Backend"
-- [x] Configure:
-- [x] Click "Save"
-- [x] Backend shows "Connected" (may take 60s)
-s**: `https://api.runpod.io/v2/YOUR_ENDPOINT_ID`
-  - **Title**: "RunPod Cloud GPU"
-- [x] Click "Save"
-- [x] Backend shows "Connected" (may take 60s)
-
-### Test from Local SwarmUI
-{{ ... }}
-- [ ] Generate tab
-- [ ] Enter prompt: "test image"
-- [ ] Click Generate
-- [ ] First generation: 60-90s (cold start)
-- [ ] Second generation: 5-15s (warm)
-- [ ] Image appears in gallery
-
-## Cost Optimization Verification
-
-- [ ] Active workers = 0 (no idle costs)
-- [ ] Idle timeout = 120s or less
-- [ ] Worker shuts down after timeout
-- [ ] No unexpected charges
-
-## Troubleshooting Checklist
-
-### If Endpoint Won't Start
-
-- [ ] Check logs for errors
-- [ ] Verify network volume is attached
-- [ ] Verify Docker image exists and is accessible
-- [ ] Try redeploying endpoint
-
-### If First Start Times Out
-
-- [ ] Check container disk size (15GB minimum)
-- [ ] Increase startup timeout in logs
-- [ ] Check network volume has space
-- [ ] Verify .NET and Python are installing correctly
-
-### If Models Not Found
-
-- [ ] Verify models are in `/runpod-volume/Models/Stable-Diffusion/`
-- [ ] Check model file names match SwarmUI expectations
-- [ ] Use Pod to verify file structure
-
-### If Connection Refused from Local SwarmUI
-
-- [ ] Verify endpoint URL is correct
-- [ ] Check endpoint is active
-- [ ] Trigger endpoint with test script first
-- [ ] Check if authentication is needed
-
-## Earning Credits (Template Creator Program)
-
-### Eligibility
-
-- [ ] Template must accumulate 1 day of total runtime
-- [ ] Template must be published
-- [ ] Users must use your template
-
-### How to Earn
-
-- [ ] Publish your template publicly
-- [ ] Share template link with community
-- [ ] Earn 1% of runtime spend from users
-- [ ] Monitor earnings in RunPod dashboard
-
-### Maximize Earnings
-
-- [ ] Create good documentation
-- [ ] Make template easy to use
-- [ ] Support users with issues
-- [ ] Share in SwarmUI Discord
-- [ ] Write tutorials/guides
-
-## Next Steps
-
-Once everything is working:
-
-- [ ] Optimize your workflow
-- [ ] Add more models to network volume
-- [ ] Experiment with different GPUs
-- [ ] Set up monitoring/alerts
-- [ ] Document your custom configurations
-- [ ] Share your setup with community
-
-## Support Resources
-
-- **SwarmUI Discord**: [Join](https://discord.gg/q2y38cqjNw)
-- **RunPod Discord**: [Join](https://discord.gg/runpod)
-- **GitHub Issues**: [Report](https://github.com/YOUR_USERNAME/runpod-swarmui-serverless/issues)
-- **Documentation**: See SETUP.md and ARCHITECTURE.md
+Use this checklist before publishing the worker as a public RunPod template.
 
 ---
 
-**Completion**: When all items are checked, your SwarmUI serverless setup is complete!
+## ✅ Prerequisites
+
+- [ ] RunPod account with sufficient credits.
+- [ ] Network volume created in the same region as your target GPUs.
+- [ ] Optional Docker Hub repository if you maintain a custom image.
+- [ ] Local environment with Python 3.11+ (for smoke tests).
+
+---
+
+## 📁 Repository Sanity Check
+
+- [ ] `Dockerfile` builds the container (installs dependencies, copies `scripts/start.sh`, `src/rp_handler.py`).
+- [ ] `scripts/start.sh` matches the current boot flow described in `docs/ARCHITECTURE.md`.
+- [ ] `src/rp_handler.py` contains inline model helpers and keep-alive action.
+- [ ] `builder/requirements.txt` lists handler dependencies (requests, runpod, python-dotenv, etc.).
+- [ ] `tests/` directory includes:
+  - `tests/test_endpoint.py`
+  - `tests/test_model_management.py`
+  - `tests/test_storage.py`
+  - `tests/test_handler.py`
+- [ ] `.env.example` reflects required environment variables (RunPod API, S3, Hugging Face token, timeouts).
+- [ ] `docs/` folder updated (`ARCHITECTURE.md`, `SETUP.md`, `QUICKSTART.md`, this checklist).
+
+---
+
+## 🌐 Network Volume & Models
+
+- [ ] Volume size ≥ 100 GB (adjust based on model catalog).
+- [ ] Region aligns with the GPU region used in the endpoint.
+- [ ] Optional: preload base models using the S3 credentials or a temporary pod.
+- [ ] Confirm folder structure on volume matches SwarmUI expectations (e.g., `Models/Stable-Diffusion/...`).
+
+---
+
+## 🐳 Image Build & Registry (if applicable)
+
+- [ ] `docker build --platform linux/amd64 -t youruser/runpod-worker-swarmui:tag .`
+- [ ] `docker push youruser/runpod-worker-swarmui:tag`
+- [ ] Template or README references the correct image/tag.
+
+GitHub Actions workflow (optional):
+
+- [ ] CI pipeline builds and publishes on push/main.
+- [ ] Secrets configured (e.g., `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`).
+
+---
+
+## ⚙️ Endpoint Deployment
+
+- [ ] Create or update RunPod Serverless endpoint.
+- [ ] Attach the correct network volume.
+- [ ] Recommended config validated:
+  - GPU: RTX 4090 (24 GB) or A100 40 GB/80 GB.
+  - Active Workers: `0` (scale from cold starts).
+  - Max Workers: ≥ `2`.
+  - Idle Timeout: `120` seconds.
+  - FlashBoot enabled.
+- [ ] Environment variables appended (from `.env.example` as needed).
+- [ ] First deployment observed until SwarmUI finishes installation (expect 20–30 minutes).
+
+---
+
+## 🧪 Functional Verification
+
+After deployment, export the required env vars locally or update `.env`, then run:
+
+- [ ] `python tests/test_endpoint.py --prompt "deployment checklist"`
+- [ ] `python tests/test_model_management.py list`
+- [ ] `python tests/test_model_management.py keep-alive --duration 180`
+- [ ] `python tests/test_storage.py`
+- [ ] `python -m unittest tests.test_handler`
+
+Confirm outputs match expectations (images saved, models listed, keep-alive success message, tests green).
+
+---
+
+## 🧷 Template Metadata (for public release)
+
+- [ ] Template name, description, and instructions updated in RunPod dashboard.
+- [ ] Link to documentation (`docs/QUICKSTART.md`, `docs/SETUP.md`) added.
+- [ ] Pricing and GPU recommendations clearly stated.
+
+---
+
+## 🛟 Troubleshooting Ready
+
+- [ ] Logs explain cold start phases (SwarmUI install, ComfyUI install, ready message).
+- [ ] `docs/SETUP.md` includes troubleshooting steps that mirror current behavior.
+- [ ] Error messages in `src/rp_handler.py` are helpful (model metadata validation, missing parameters, etc.).
+
+---
+
+## 📣 Final Steps
+
+- [ ] Share template link, documentation, and usage instructions.
+- [ ] Monitor first few deployments for unexpected issues or user feedback.
+
+Once every item is checked, your worker is ready for public consumption. 🎉

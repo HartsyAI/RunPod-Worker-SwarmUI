@@ -21,7 +21,7 @@ Environment variables (used as defaults for CLI options)::
     RUNPOD_SECRET_ACCESS_KEY
     RUNPOD_TRAINING_STORAGE_REGION
     RUNPOD_TRAINING_STORAGE_VOLUME_ID
-    HF_TOKEN
+    HUGGINGFACE_API_TOKEN
 """
 
 from __future__ import annotations
@@ -240,7 +240,7 @@ def parse_args(argv: Optional[Iterable[str]] = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--token",
-        help="Hugging Face access token (overrides HF_TOKEN environment variable).",
+        help="Hugging Face access token (overrides HUGGINGFACE_API_TOKEN environment variable).",
     )
     parser.add_argument(
         "--list",
@@ -305,7 +305,7 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
         )
         return 2
 
-    token = args.token or os.environ.get("HF_TOKEN")
+    token = args.token or os.environ.get("HUGGINGFACE_API_TOKEN")
     headers = build_headers(token)
 
     try:

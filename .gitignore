@@ -1,1 +1,3 @@
 /.vs
+/tests/__pycache__
+.env
