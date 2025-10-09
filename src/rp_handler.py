@@ -134,14 +134,24 @@ def list_models_action(path: str = '',
                       allow_remote: bool = True,
                       sort_by: Optional[str] = None,
                       sort_reverse: Optional[bool] = None,
-                      data_images: Optional[bool] = None) -> Dict[str, Any]:
+                      data_images: Optional[bool] = None,
+                      session_id: Optional[str] = None) -> Dict[str, Any]:
     """List available models via SwarmUI."""
+
+    if session_id is None:
+        session_id = get_session_id()
+        if not session_id:
+            return {
+                'success': False,
+                'error': 'Failed to obtain session for list_models request'
+            }
 
     payload: Dict[str, Any] = {
         'path': path,
         'depth': depth,
         'subtype': subtype,
-        'allowRemote': allow_remote
+        'allowRemote': allow_remote,
+        'session_id': session_id
     }
 
     if sort_by is not None:
