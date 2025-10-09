@@ -28,13 +28,14 @@ class TestHandlerHelpers(unittest.TestCase):
         mock_post.assert_called_once()
 
     def test_prepare_text2image_payload_defaults(self) -> None:
-        payload = handler.prepare_text2image_payload({}, "session-1")
+        payload, raw_input = handler.prepare_text2image_payload({}, "session-1")
 
         self.assertEqual(payload["session_id"], "session-1")
         self.assertEqual(payload["images"], 1)
-        raw_input = payload["raw_input"]
         self.assertIn("prompt", raw_input)
         self.assertIn("model", raw_input)
+        for key, value in raw_input.items():
+            self.assertEqual(payload[key], value)
 
     def test_prepare_text2image_payload_images_validation(self) -> None:
         with self.assertRaises(ValueError):

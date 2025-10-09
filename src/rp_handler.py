@@ -8,7 +8,7 @@ import time
 import base64
 import json
 import traceback
-from typing import Dict, Any, Optional, Union, List
+from typing import Dict, Any, Optional, Union, List, Tuple
 
 import requests
 import runpod
@@ -306,7 +306,7 @@ def keep_worker_alive_action(duration_seconds: int,
     return result
 
 
-def prepare_text2image_payload(job_input: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+def prepare_text2image_payload(job_input: Dict[str, Any], session_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Prepare payload for /API/GenerateText2Image based on job input."""
 
     raw_input = job_input.get('raw_input') or job_input.get('rawInput')
@@ -351,15 +351,16 @@ def prepare_text2image_payload(job_input: Dict[str, Any], session_id: str) -> Di
 
     payload: Dict[str, Any] = {
         'session_id': session_id,
-        'images': images_count,
-        'raw_input': raw_input
+        'images': images_count
     }
 
     extra_metadata = job_input.get('extra_metadata')
     if extra_metadata is not None:
         payload['extra_metadata'] = extra_metadata
 
-    return payload
+    payload.update(raw_input)
+
+    return payload, raw_input
 
 
 def wait_for_service(url: str, max_attempts: Optional[int] = None) -> bool:
@@ -402,7 +403,7 @@ def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
 
             if session_id:
                 try:
-                    test_payload = prepare_text2image_payload({
+                    test_payload, _ = prepare_text2image_payload({
                         'images': 0,
                         'prompt': 'warmup',
                         'model': 'OfficialStableDiffusion/sd_xl_base_1.0',
@@ -414,13 +415,11 @@ def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
                     test_payload = {
                         'session_id': session_id,
                         'images': 0,
-                        'raw_input': {
-                            'prompt': 'warmup',
-                            'model': 'OfficialStableDiffusion/sd_xl_base_1.0',
-                            'steps': 1,
-                            'width': 512,
-                            'height': 512
-                        }
+                        'prompt': 'warmup',
+                        'model': 'OfficialStableDiffusion/sd_xl_base_1.0',
+                        'steps': 1,
+                        'width': 512,
+                        'height': 512
                     }
 
                 try:
@@ -506,12 +505,11 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
         return {'success': False, 'error': 'Failed to create SwarmUI session'}
 
     try:
-        payload = prepare_text2image_payload(job_input, session_id)
+        request_payload, raw_input = prepare_text2image_payload(job_input, session_id)
     except ValueError as err:
         return {'success': False, 'error': str(err)}
 
-    images_requested = payload.get('images', 1)
-    raw_input = payload.get('raw_input', {})
+    images_requested = request_payload.get('images', 1)
 
     prompt = raw_input.get('prompt')
     model = raw_input.get('model')
@@ -535,7 +533,7 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
     print()
 
     try:
-        result = swarm_post('/API/GenerateText2Image', payload, timeout=GENERATION_TIMEOUT)
+        result = swarm_post('/API/GenerateText2Image', request_payload, timeout=GENERATION_TIMEOUT)
     except requests.exceptions.Timeout:
         return {'success': False, 'error': f'Generation timed out after {GENERATION_TIMEOUT}s'}
     except Exception as err:
