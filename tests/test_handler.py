@@ -32,7 +32,7 @@ class TestHandlerHelpers(unittest.TestCase):
 
         self.assertEqual(payload["session_id"], "session-1")
         self.assertEqual(payload["images"], 1)
-        raw_input = payload["rawInput"]
+        raw_input = payload["raw_input"]
         self.assertIn("prompt", raw_input)
         self.assertIn("model", raw_input)
 
