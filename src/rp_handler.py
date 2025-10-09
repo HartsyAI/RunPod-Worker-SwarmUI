@@ -352,7 +352,7 @@ def prepare_text2image_payload(job_input: Dict[str, Any], session_id: str) -> Di
     payload: Dict[str, Any] = {
         'session_id': session_id,
         'images': images_count,
-        'rawInput': raw_input
+        'raw_input': raw_input
     }
 
     extra_metadata = job_input.get('extra_metadata')
@@ -414,7 +414,7 @@ def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
                     test_payload = {
                         'session_id': session_id,
                         'images': 0,
-                        'rawInput': {
+                        'raw_input': {
                             'prompt': 'warmup',
                             'model': 'OfficialStableDiffusion/sd_xl_base_1.0',
                             'steps': 1,
@@ -511,7 +511,7 @@ def generate_image(job_input: Dict[str, Any]) -> Dict[str, Any]:
         return {'success': False, 'error': str(err)}
 
     images_requested = payload.get('images', 1)
-    raw_input = payload.get('rawInput', {})
+    raw_input = payload.get('raw_input', {})
 
     prompt = raw_input.get('prompt')
     model = raw_input.get('model')
