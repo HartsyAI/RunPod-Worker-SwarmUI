@@ -1,4 +1,4 @@
-# SwarmUI RunPod Serverless - Simplified Dockerfile
+# SwarmUI RunPod Serverless - Minimal Dockerfile
 # Uses SwarmUI's official install and launch scripts
 
 FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
@@ -13,7 +13,7 @@ ENV SWARMUI_HOST=0.0.0.0
 WORKDIR /
 
 # ============================================================================== 
-# Install System Dependencies (SwarmUI Prerequisites)
+# Install System Dependencies
 # ============================================================================== 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -28,7 +28,6 @@ RUN apt-get update && \
         python3.11-venv \
         python3.11-dev \
         python3-pip \
-        python3-full \
         # Build tools
         build-essential \
         # Image processing
@@ -50,13 +49,10 @@ RUN apt-get update && \
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 
-# Verify Python has pip
-RUN python3.11 -m pip --version
-
 # ============================================================================== 
-# Install RunPod Handler Dependencies
+# Install Handler Dependencies
 # ============================================================================== 
-COPY builder/requirements.txt /requirements.txt
+COPY requirements.txt /requirements.txt
 RUN python3 -m pip install --no-cache-dir --upgrade pip && \
     python3 -m pip install --no-cache-dir -r /requirements.txt && \
     rm /requirements.txt

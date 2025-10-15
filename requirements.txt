@@ -1,7 +1,11 @@
-boto3>=1.26.0
-requests>=2.28.0
-urllib3>=1.26.0
+# SwarmUI RunPod Serverless - Minimal Dependencies
+
+# RunPod SDK (required for serverless handler)
+runpod>=1.6.2
+
+# HTTP requests with retry capabilities
+requests>=2.31.0
+urllib3>=2.0.0
+
+# Environment variable management (for local testing)
 python-dotenv>=0.21.0
-runpod>=0.8.0
-PyYAML>=6.0
-typing-extensions>=4.0.0
