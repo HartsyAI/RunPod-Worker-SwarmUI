@@ -1,330 +1,210 @@
-# SwarmUI RunPod Serverless Worker
+# SwarmUI RunPod Serverless - Direct URL Access
 
-**Minimal, production-ready serverless handler for SwarmUI on RunPod.**
+**Wake up a SwarmUI worker, get a public URL, and make direct API calls.**
 
-This project provides a lightweight wrapper that starts SwarmUI on RunPod Serverless and exposes its API for external applications to use. The handler does minimal work—it just ensures SwarmUI is ready and forwards API requests.
-
----
-
-## Key Features
-
-- ✅ **Minimal Handler**: ~200 lines vs 700+ in typical implementations
-- ✅ **Official Scripts**: Uses SwarmUI's own install/launch scripts
-- ✅ **Pass-Through Design**: External apps call SwarmUI API directly
-- ✅ **Fast Warm Starts**: 60-90 seconds after first install
-- ✅ **Persistent Storage**: Network volume preserves models/config
-- ✅ **Production Ready**: Health checks, keepalive, graceful shutdown
+This serverless worker exposes SwarmUI on a public URL so you can access its API directly without routing through the handler.
 
 ---
 
-## Architecture Overview
+## 📚 Documentation
+
+**Getting Started:**
+1. **[Workflow Guide](docs/WORKFLOW.md)** - Complete step-by-step workflow walkthrough
+2. **[Client Usage Guide](docs/CLIENT.md)** - Using the Python client class
+3. **[SwarmUI API Reference](docs/SWARMUI_API.md)** - Complete API documentation
+
+**Quick links:**
+- [How It Works](#how-it-works)
+- [Quick Start](#quick-start)
+- [Complete Example](#complete-example)
+- [Handler API](#handler-api)
+- [Testing](#testing)
+
+---
+
+## How It Works
 
 ```
-External App (Your Code)
-    ↓
-RunPod API Endpoint
-    ↓
-Handler (this project)
-    ↓ forwards requests to
-SwarmUI API (localhost:7801)
+1. Send "wakeup" request to RunPod
+   ↓
+2. Worker starts and returns public URL
+   ↓
+3. Make direct SwarmUI API calls to that URL
+   ↓
+4. Handler keeps worker alive by pinging SwarmUI
+   ↓
+5. Send "shutdown" when done (or let keepalive expire)
 ```
 
-**The handler's only jobs:**
-1. Wait for SwarmUI to start and backends to be ready
-2. Provide `/ready`, `/health` endpoints
-3. Forward SwarmUI API requests from your app
-4. Handle `/keepalive` and `/shutdown` signals
+**Public URL format:**
+```
+https://{worker-id}-7801.proxy.runpod.net
+```
 
-**Your external app:**
-- Starts the worker via RunPod API
-- Polls `/ready` until SwarmUI is available
-- Makes SwarmUI API calls (generate images, list models, etc.)
-- Sends `/shutdown` when done
+You can access SwarmUI directly at this URL while the worker is alive.
+
+**👉 For complete workflow details, see the [Workflow Guide](docs/WORKFLOW.md)**
 
 ---
 
 ## Quick Start
 
-### 1. Prerequisites
+### 1. Deploy Endpoint
 
-- RunPod account with credits
-- Network volume (100GB+ recommended)
-- Python 3.11+ for local testing
-
-### 2. Deploy to RunPod
-
-**Option A: Use Published Template** (recommended)
 1. Go to [RunPod Serverless](https://runpod.io/console/serverless)
-2. Create endpoint from template: `swarmui-serverless` (or your published template)
-3. Attach network volume
-4. Deploy
+2. Create endpoint with this Docker image
+3. Attach a network volume (100GB+)
+4. Configure:
+   - GPU: RTX 4090 (24GB) or A100 (40GB+)
+   - Active Workers: 0
+   - Max Workers: 3
+   - Idle Timeout: 120s
+   - FlashBoot: Enabled
 
-**Option B: Build Your Own Image**
-```bash
-docker build --platform linux/amd64 -t youruser/swarmui-runpod:latest .
-docker push youruser/swarmui-runpod:latest
-```
-
-### 3. Trigger First Install
-
-First run takes 20-30 minutes to install SwarmUI + ComfyUI:
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Copy and configure .env
-cp .env.example .env
-# Edit .env with your RUNPOD_ENDPOINT_ID and RUNPOD_API_TOKEN
-
-# Trigger installation
-python scripts/trigger_install.py
-```
-
-Subsequent cold starts take only 60-90 seconds.
-
-### 4. Test the Worker
-
-```bash
-# Test health endpoints
-python tests/test_health.py
-
-# Test SwarmUI API pass-through
-python tests/test_swarm_passthrough.py --prompt "a beautiful landscape"
-```
-
----
-
-## Usage from External App
-
-### Python Example
+### 2. Wake Up Worker
 
 ```python
 import requests
-import time
 
-# Configuration
-ENDPOINT_ID = "your-endpoint-id"
-API_KEY = "your-api-key"
-BASE_URL = f"https://api.runpod.ai/v2/{ENDPOINT_ID}/runsync"
+endpoint_id = "your-endpoint-id"
+api_key = "your-api-key"
 
-headers = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json"
-}
-
-# 1. Start worker and wait for ready
-print("Starting worker...")
-ready = False
-while not ready:
-    response = requests.post(
-        BASE_URL,
-        json={"input": {"action": "ready"}},
-        headers=headers,
-        timeout=120
-    )
-    result = response.json()
-    ready = result.get("output", {}).get("ready", False)
-    
-    if not ready:
-        print("Waiting for SwarmUI to start...")
-        time.sleep(15)
-
-print("✓ Worker ready!")
-
-# 2. Get SwarmUI session
+# Wake up worker (keeps alive for 1 hour)
 response = requests.post(
-    BASE_URL,
+    f"https://api.runpod.ai/v2/{endpoint_id}/runsync",
     json={
         "input": {
-            "action": "swarm_api",
-            "method": "POST",
-            "path": "/API/GetNewSession"
+            "action": "wakeup",
+            "duration": 3600,  # 1 hour
+            "interval": 30      # ping every 30s
         }
     },
-    headers=headers,
-    timeout=30
+    headers={"Authorization": f"Bearer {api_key}"},
+    timeout=3700
 )
 
-session_id = response.json()["output"]["response"]["session_id"]
+result = response.json()["output"]
+public_url = result["public_url"]
+print(f"SwarmUI URL: {public_url}")
+```
 
-# 3. Generate image
+**Note:** The wakeup request blocks for the full duration (1 hour in this case) to keep the worker alive. Start it in a background thread if needed.
+
+**👉 Want a simpler way? Check out the [Client Usage Guide](docs/CLIENT.md) for a ready-to-use Python class**
+
+### 3. Make Direct SwarmUI API Calls
+
+```python
+# Get session
+response = requests.post(f"{public_url}/API/GetNewSession")
+session_id = response.json()["session_id"]
+
+# Generate image
 response = requests.post(
-    BASE_URL,
+    f"{public_url}/API/GenerateText2Image",
     json={
-        "input": {
-            "action": "swarm_api",
-            "method": "POST",
-            "path": "/API/GenerateText2Image",
-            "payload": {
-                "session_id": session_id,
-                "prompt": "a beautiful mountain landscape",
-                "model": "OfficialStableDiffusion/sd_xl_base_1.0",
-                "width": 1024,
-                "height": 1024,
-                "steps": 30,
-                "cfg_scale": 7.5,
-                "images": 1
-            },
-            "timeout": 600
-        }
+        "session_id": session_id,
+        "prompt": "a beautiful mountain landscape",
+        "model": "OfficialStableDiffusion/sd_xl_base_1.0",
+        "width": 1024,
+        "height": 1024,
+        "steps": 30
     },
-    headers=headers,
-    timeout=630
+    timeout=600
 )
 
-result = response.json()
-images = result["output"]["response"]["images"]
-print(f"Generated {len(images)} image(s)")
+images = response.json()["images"]
+print(f"Generated: {images}")
+```
 
-# 4. Shutdown when done (optional)
+### 4. Shutdown When Done
+
+```python
 requests.post(
-    BASE_URL,
+    f"https://api.runpod.ai/v2/{endpoint_id}/runsync",
     json={"input": {"action": "shutdown"}},
-    headers=headers,
+    headers={"Authorization": f"Bearer {api_key}"},
     timeout=30
 )
 ```
 
-### C# Example
-
-```csharp
-using System.Net.Http.Json;
-using System.Text.Json;
-
-public class SwarmUIClient
-{
-    public string EndpointId { get; set; }
-    public string ApiKey { get; set; }
-    public HttpClient Http { get; set; }
-    
-    public string BaseUrl => $"https://api.runpod.ai/v2/{EndpointId}/runsync";
-    
-    public SwarmUIClient(string endpointId, string apiKey)
-    {
-        EndpointId = endpointId;
-        ApiKey = apiKey;
-        Http = new HttpClient();
-        Http.DefaultRequestHeaders.Add("Authorization", $"Bearer {ApiKey}");
-        Http.Timeout = TimeSpan.FromSeconds(120);
-    }
-    
-    public async Task<bool> WaitForReadyAsync()
-    {
-        Console.WriteLine("Starting worker...");
-        
-        while (true)
-        {
-            var payload = new
-            {
-                input = new { action = "ready" }
-            };
-            
-            var response = await Http.PostAsJsonAsync(BaseUrl, payload);
-            var result = await response.Content.ReadFromJsonAsync<JsonDocument>();
-            
-            var ready = result.RootElement
-                .GetProperty("output")
-                .GetProperty("ready")
-                .GetBoolean();
-            
-            if (ready)
-            {
-                Console.WriteLine("✓ Worker ready!");
-                return true;
-            }
-            
-            Console.WriteLine("Waiting for SwarmUI...");
-            await Task.Delay(15000);
-        }
-    }
-    
-    public async Task<string> GetSessionIdAsync()
-    {
-        var payload = new
-        {
-            input = new
-            {
-                action = "swarm_api",
-                method = "POST",
-                path = "/API/GetNewSession"
-            }
-        };
-        
-        var response = await Http.PostAsJsonAsync(BaseUrl, payload);
-        var result = await response.Content.ReadFromJsonAsync<JsonDocument>();
-        
-        return result.RootElement
-            .GetProperty("output")
-            .GetProperty("response")
-            .GetProperty("session_id")
-            .GetString();
-    }
-    
-    public async Task<List<string>> GenerateImageAsync(
-        string sessionId,
-        string prompt,
-        string model = "OfficialStableDiffusion/sd_xl_base_1.0")
-    {
-        var payload = new
-        {
-            input = new
-            {
-                action = "swarm_api",
-                method = "POST",
-                path = "/API/GenerateText2Image",
-                payload = new
-                {
-                    session_id = sessionId,
-                    prompt = prompt,
-                    model = model,
-                    width = 1024,
-                    height = 1024,
-                    steps = 30,
-                    cfg_scale = 7.5,
-                    images = 1
-                },
-                timeout = 600
-            }
-        };
-        
-        Http.Timeout = TimeSpan.FromSeconds(630);
-        
-        var response = await Http.PostAsJsonAsync(BaseUrl, payload);
-        var result = await response.Content.ReadFromJsonAsync<JsonDocument>();
-        
-        var images = result.RootElement
-            .GetProperty("output")
-            .GetProperty("response")
-            .GetProperty("images")
-            .EnumerateArray()
-            .Select(x => x.GetString())
-            .ToList();
-        
-        return images;
-    }
-}
-
-// Usage
-var client = new SwarmUIClient("your-endpoint", "your-key");
-await client.WaitForReadyAsync();
-
-var sessionId = await client.GetSessionIdAsync();
-var images = await client.GenerateImageAsync(
-    sessionId,
-    "a beautiful mountain landscape"
-);
-
-Console.WriteLine($"Generated {images.Count} image(s)");
-```
+**👉 For all available SwarmUI endpoints, see the [SwarmUI API Reference](docs/SWARMUI_API.md)**
 
 ---
 
-## Handler API Reference
+## Complete Example
 
-All requests go through RunPod's `/runsync` endpoint with an `action` parameter.
+See `examples/client.py` for a reusable client class:
 
-### `ready` - Check if SwarmUI is ready
+```python
+from client import SwarmUIClient
+
+# Initialize
+client = SwarmUIClient("your-endpoint", "your-key")
+
+# Wake up and get URL
+public_url = client.wakeup(duration=3600)  # 1 hour
+
+# Get session
+session_id = client.get_session(public_url)
+
+# Generate images
+images = client.generate_image(
+    public_url,
+    session_id,
+    "a serene ocean sunset",
+    width=1024,
+    height=1024,
+    steps=30
+)
+
+# Shutdown
+client.shutdown()
+```
+
+**👉 This example uses our pre-built client. For manual implementation details, see the [Workflow Guide](docs/WORKFLOW.md)**
+
+---
+
+## Handler API
+
+### `wakeup` - Start Worker and Get URL
+
+**Request:**
+```json
+{
+  "input": {
+    "action": "wakeup",
+    "duration": 3600,
+    "interval": 30
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "output": {
+    "success": true,
+    "public_url": "https://abc123-7801.proxy.runpod.net",
+    "session_id": "def456...",
+    "version": "0.6.5-Beta",
+    "worker_id": "abc123",
+    "keepalive": {
+      "duration": 3600,
+      "pings": 120,
+      "failures": 0
+    }
+  }
+}
+```
+
+**Notes:**
+- Request blocks for full duration (keeps worker alive)
+- Run in background thread if needed
+- Worker auto-shuts down after duration expires
+
+### `ready` - Check Status
 
 **Request:**
 ```json
@@ -340,14 +220,15 @@ All requests go through RunPod's `/runsync` endpoint with an `action` parameter.
 {
   "output": {
     "ready": true,
-    "session_id": "abc123...",
+    "public_url": "https://abc123-7801.proxy.runpod.net",
+    "session_id": "def456...",
     "version": "0.6.5-Beta",
-    "api_url": "http://127.0.0.1:7801"
+    "worker_id": "abc123"
   }
 }
 ```
 
-### `health` - Quick health check
+### `health` - Quick Health Check
 
 **Request:**
 ```json
@@ -362,19 +243,21 @@ All requests go through RunPod's `/runsync` endpoint with an `action` parameter.
 ```json
 {
   "output": {
-    "healthy": true
+    "healthy": true,
+    "public_url": "https://abc123-7801.proxy.runpod.net",
+    "worker_id": "abc123"
   }
 }
 ```
 
-### `keepalive` - Keep worker warm
+### `keepalive` - Extend Worker Lifetime
 
 **Request:**
 ```json
 {
   "input": {
     "action": "keepalive",
-    "duration": 300,
+    "duration": 1800,
     "interval": 30
   }
 }
@@ -385,50 +268,17 @@ All requests go through RunPod's `/runsync` endpoint with an `action` parameter.
 {
   "output": {
     "success": true,
-    "pings": 10,
+    "public_url": "https://abc123-7801.proxy.runpod.net",
+    "worker_id": "abc123",
+    "pings": 60,
     "failures": 0,
-    "duration": 300,
+    "duration": 1800,
     "interval": 30
   }
 }
 ```
 
-### `swarm_api` - Forward SwarmUI API request
-
-**Request:**
-```json
-{
-  "input": {
-    "action": "swarm_api",
-    "method": "POST",
-    "path": "/API/GenerateText2Image",
-    "payload": {
-      "session_id": "abc123",
-      "prompt": "your prompt",
-      "model": "OfficialStableDiffusion/sd_xl_base_1.0",
-      "width": 1024,
-      "height": 1024,
-      "steps": 30
-    },
-    "timeout": 600
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "output": {
-    "success": true,
-    "response": {
-      "images": ["Output/path/to/image.png"],
-      "seed": 12345
-    }
-  }
-}
-```
-
-### `shutdown` - Signal graceful shutdown
+### `shutdown` - Signal Shutdown
 
 **Request:**
 ```json
@@ -444,73 +294,60 @@ All requests go through RunPod's `/runsync` endpoint with an `action` parameter.
 {
   "output": {
     "success": true,
-    "message": "Shutdown acknowledged"
+    "message": "Shutdown acknowledged",
+    "worker_id": "abc123"
   }
 }
 ```
 
 ---
 
-## SwarmUI API Documentation
+## SwarmUI API Reference
 
-See [SwarmUI API Documentation](https://github.com/mcmonkeyprojects/SwarmUI/blob/master/docs/API.md) for full API reference.
+Once you have the public URL, you can use any SwarmUI API endpoint:
 
-**Common endpoints:**
-- `/API/GetNewSession` - Get session ID
-- `/API/ListModels` - List available models
-- `/API/GenerateText2Image` - Generate images
-- `/API/DescribeModel` - Get model metadata
-- `/API/DoModelDownloadWS` - Download models
+### Common Endpoints
 
----
-
-## Environment Variables
-
-### Container Runtime (set in RunPod endpoint config)
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SWARMUI_HOST` | `0.0.0.0` | Bind address |
-| `SWARMUI_PORT` | `7801` | API port |
-| `SWARMUI_API_URL` | `http://127.0.0.1:7801` | Internal API URL |
-| `VOLUME_PATH` | `/runpod-volume` | Network volume mount |
-| `STARTUP_TIMEOUT` | `1800` | Max wait for startup (seconds) |
-
-### Local Testing (set in `.env` file)
-
-| Variable | Description |
-|----------|-------------|
-| `RUNPOD_ENDPOINT_ID` | Your RunPod endpoint ID |
-| `RUNPOD_API_TOKEN` | Your RunPod API token |
-
----
-
-## File Structure
-
-```
-/
-├── Dockerfile                    # Container image definition
-├── requirements.txt              # Python dependencies
-├── .env.example                  # Environment variables template
-├── scripts/
-│   ├── start.sh                  # SwarmUI startup script
-│   └── trigger_install.py        # First-time install helper
-├── src/
-│   └── rp_handler.py             # Minimal RunPod handler (~200 lines)
-├── tests/
-│   ├── test_health.py            # Health endpoint tests
-│   └── test_swarm_passthrough.py # SwarmUI API tests
-└── docs/
-    ├── ARCHITECTURE.md           # Detailed architecture
-    ├── QUICKSTART.md             # Quick start guide
-    └── API.md                    # Complete API reference
+**GetNewSession:**
+```bash
+curl -X POST https://abc123-7801.proxy.runpod.net/API/GetNewSession \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
 
+**ListModels:**
+```bash
+curl -X POST https://abc123-7801.proxy.runpod.net/API/ListModels \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "your-session",
+    "path": "",
+    "depth": 2,
+    "subtype": "Stable-Diffusion"
+  }'
+```
+
+**GenerateText2Image:**
+```bash
+curl -X POST https://abc123-7801.proxy.runpod.net/API/GenerateText2Image \
+  -H "Content-Type: application/json" \
+  -d '{
+    "session_id": "your-session",
+    "prompt": "a mountain landscape",
+    "model": "OfficialStableDiffusion/sd_xl_base_1.0",
+    "width": 1024,
+    "height": 1024,
+    "steps": 30
+  }'
+```
+
+**Full API documentation:** [SwarmUI API Docs](https://github.com/mcmonkeyprojects/SwarmUI/blob/master/docs/API.md)
+
+**👉 For detailed parameter descriptions and more endpoints, see our [SwarmUI API Reference](docs/SWARMUI_API.md)**
+
 ---
 
-## Development
-
-### Running Tests
+## Testing
 
 ```bash
 # Install dependencies
@@ -518,26 +355,13 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your endpoint credentials
+# Edit .env with your credentials
 
-# Run health tests
-python tests/test_health.py
+# Run complete workflow test
+python tests/test_direct_url.py --duration 600  # 10 minutes
 
-# Run API tests
-python tests/test_swarm_passthrough.py
-
-# Run specific test
-python tests/test_swarm_passthrough.py --prompt "custom prompt"
-```
-
-### Building Image
-
-```bash
-# Build for AMD64
-docker build --platform linux/amd64 -t youruser/swarmui-runpod:latest .
-
-# Push to registry
-docker push youruser/swarmui-runpod:latest
+# Send shutdown
+python tests/test_direct_url.py --shutdown
 ```
 
 ---
@@ -545,58 +369,197 @@ docker push youruser/swarmui-runpod:latest
 ## Cold Start Times
 
 **First Run (initial install):**
-- Download SwarmUI installer: ~5s
-- Install SwarmUI: ~3 minutes
-- Install ComfyUI: ~15 minutes
-- Build & start: ~3 minutes
-- **Total: 20-30 minutes**
+- SwarmUI + ComfyUI installation: 20-30 minutes
+- Stored on network volume, only happens once
 
 **Subsequent Runs:**
-- Launch existing SwarmUI: ~60-90 seconds
+- Worker startup: 60-90 seconds
+- Almost instant if within idle timeout (120s)
+
+---
+
+## Workflow Patterns
+
+### One-Off Generation
+
+```python
+# Wake up, generate, shutdown
+public_url = client.wakeup(duration=600)  # 10 minutes
+session_id = client.get_session(public_url)
+images = client.generate_image(public_url, session_id, "prompt")
+client.shutdown()
+```
+
+### Interactive Session
+
+```python
+# Wake up for 1 hour
+public_url = client.wakeup(duration=3600)
+session_id = client.get_session(public_url)
+
+# Generate multiple images
+for prompt in prompts:
+    images = client.generate_image(public_url, session_id, prompt)
+    process_images(images)
+
+# Extend if needed
+client._call_handler("keepalive", duration=1800, timeout=1900)
+
+# Shutdown when done
+client.shutdown()
+```
+
+### Background Worker
+
+```python
+import threading
+
+# Start long-running keepalive in background
+def keep_alive():
+    client._call_handler("wakeup", duration=7200, timeout=7300)  # 2 hours
+
+thread = threading.Thread(target=keep_alive, daemon=True)
+thread.start()
+
+# Get URL from ready check
+time.sleep(90)  # Wait for worker to start
+result = client._call_handler("ready")
+public_url = result["public_url"]
+
+# Use public_url for the next 2 hours
+# Worker will auto-shutdown after 2 hours
+```
+
+---
+
+## Cost Optimization
+
+**Tips:**
+- Use appropriate keepalive duration (don't over-allocate)
+- RTX 4090: ~$0.89/hour (~$0.015/minute)
+- Shutdown explicitly when done
+- Monitor active workers in RunPod dashboard
+
+**Example costs:**
+- 10-minute session: ~$0.15
+- 1-hour session: ~$0.89
+- 5 images @ 30s each: ~$0.03
 
 ---
 
 ## Troubleshooting
 
-### Cold start taking too long
-- First install: 20-30 minutes is normal
-- Check RunPod dashboard logs
-- Ensure network volume has 15GB+ free space
+### Worker not starting
+- Check logs in RunPod dashboard
+- Verify network volume has 15GB+ free space
+- First install takes 20-30 minutes
 
-### Worker not responding
-- Verify endpoint is active in RunPod dashboard
-- Check that network volume is attached
-- Use `test_health.py` to diagnose
+### Can't access public URL
+- Verify worker is still alive (within keepalive duration)
+- Check URL format: `https://{worker-id}-7801.proxy.runpod.net`
+- Try ready check to get current URL
 
-### Generation failures
-- Ensure models are loaded (use `test_swarm_passthrough.py --skip-generation` to test API)
-- Check SwarmUI logs in container
-- Verify model name is correct (use ListModels API)
+### Generation timeouts
+- Increase request timeout (600s minimum)
+- Reduce steps/resolution for faster generation
+- Use faster models (SDXL Turbo, Flux Schnell)
 
-### Timeout errors
-- Increase timeout values in your requests
-- Complex generations may need 10+ minutes
-- Consider using async `/run` endpoint for long tasks
+### High costs
+- Check for orphaned workers
+- Reduce keepalive duration
+- Always send shutdown when done
+
+---
+
+## Architecture
+
+```
+Your Application
+    ↓ (1) Wakeup request
+RunPod API Gateway
+    ↓ (2) Start worker if needed
+Worker Container
+    ├─ start.sh (launches SwarmUI)
+    └─ rp_handler.py (keeps alive, returns URL)
+         ↓ (3) Returns public URL
+Your Application
+    ↓ (4) Direct SwarmUI API calls
+https://{worker-id}-7801.proxy.runpod.net
+    ↓ (5) SwarmUI processes requests
+    └─ Returns generated images
+```
+
+---
+
+## Files
+
+```
+/
+├── src/
+│   └── rp_handler.py              # Handler with direct URL support
+├── scripts/
+│   ├── start.sh                    # SwarmUI startup script
+│   └── trigger_install.py          # First-time installation helper
+├── tests/
+│   └── test_direct_url.py          # Complete workflow test
+├── examples/
+│   └── client.py                   # Reusable Python client
+├── docs/
+│   ├── ARCHITECTURE.md             # Design details
+│   ├── QUICKSTART.md               # Fast start guide
+│   └── API.md                      # Complete API reference
+├── Dockerfile                      # Container image
+├── requirements.txt                # Python dependencies
+└── .env.example                    # Environment template
+```
+
+---
+
+## 📖 Complete Documentation
+
+Ready to dive deeper? Here's your learning path:
+
+### 1. **[Workflow Guide](docs/WORKFLOW.md)** ← Start here!
+Complete step-by-step walkthrough:
+- How to wake up workers
+- Getting public URLs
+- Making direct SwarmUI API calls
+- Batch generation patterns
+- Error handling and troubleshooting
+
+### 2. **[Client Usage Guide](docs/CLIENT.md)**
+Using our Python client class:
+- Quick start examples
+- API reference for all methods
+- Advanced usage patterns
+- Error handling
+- Performance tips
+
+### 3. **[SwarmUI API Reference](docs/SWARMUI_API.md)**
+Complete SwarmUI API documentation:
+- All available endpoints
+- Request/response formats
+- Parameter descriptions
+- Code examples
+- Links to official docs
 
 ---
 
 ## Support
 
-- **Documentation**: See `docs/` folder
-- **Issues**: GitHub Issues
-- **SwarmUI**: [SwarmUI Discord](https://discord.gg/q2y38cqjNw)
-- **RunPod**: [RunPod Discord](https://discord.gg/runpod)
+- **Issues:** GitHub Issues
+- **SwarmUI:** [SwarmUI Discord](https://discord.gg/q2y38cqjNw)
+- **RunPod:** [RunPod Discord](https://discord.gg/runpod)
 
 ---
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT - See [LICENSE](LICENSE) file for details.
 
 ---
 
 ## Credits
 
-- **SwarmUI**: [mcmonkeyprojects/SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI)
-- **RunPod**: [runpod.io](https://runpod.io)
-- 
+- **SwarmUI:** [mcmonkeyprojects/SwarmUI](https://github.com/mcmonkeyprojects/SwarmUI)
+- **RunPod:** [runpod.io](https://runpod.io)

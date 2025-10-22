@@ -1,10 +1,11 @@
-"""RunPod Handler for SwarmUI Serverless Worker.
+"""RunPod Handler for SwarmUI Serverless Worker - Direct URL Access.
 
-Minimal pass-through handler that:
-1. Waits for SwarmUI to start and backends to be ready
-2. Provides health/ready endpoints
-3. Forwards SwarmUI API requests
-4. Handles keepalive and shutdown signals
+Workflow:
+1. Send wakeup/keepalive request to start worker
+2. Handler returns public SwarmUI URL
+3. Make direct SwarmUI API calls to that URL
+4. Handler keeps worker alive by pinging SwarmUI
+5. Send shutdown when done
 """
 
 import os
@@ -18,10 +19,14 @@ import runpod
 
 # Configuration
 SWARMUI_API_URL = os.getenv('SWARMUI_API_URL', 'http://127.0.0.1:7801')
+SWARMUI_PORT = os.getenv('SWARMUI_PORT', '7801')
 STARTUP_TIMEOUT = int(os.getenv('STARTUP_TIMEOUT', '1800'))
 CHECK_INTERVAL = 10
 
-# Setup session with retries
+# Get worker ID from RunPod environment
+RUNPOD_POD_ID = os.getenv('RUNPOD_POD_ID', 'unknown')
+
+# HTTP session with retries
 session = requests.Session()
 adapter = requests.adapters.HTTPAdapter(
     max_retries=requests.adapters.Retry(
@@ -65,65 +70,57 @@ class Log:
         print(f"[WARNING] ⚠ {msg}")
 
 
-def build_url(path: str) -> str:
-    """Build full URL for SwarmUI API request."""
-    if path.startswith('http'):
-        return path
-    base = SWARMUI_API_URL.rstrip('/')
-    path = path.lstrip('/')
-    return f"{base}/{path}"
+def get_public_url() -> str:
+    """Get the public URL where SwarmUI is accessible.
+    
+    Returns:
+        Public URL in format: https://{worker-id}-{port}.proxy.runpod.net
+    """
+    return f"https://{RUNPOD_POD_ID}-{SWARMUI_PORT}.proxy.runpod.net"
 
 
-def swarm_request(method: str, path: str, payload: Optional[Dict[str, Any]] = None, 
+def swarm_request(method: str, path: str, payload: Optional[Dict[str, Any]] = None,
                   timeout: int = 30) -> Dict[str, Any]:
     """Make HTTP request to SwarmUI API.
     
     Args:
-        method: HTTP method (GET, POST, etc.)
-        path: API path (e.g., '/API/GetNewSession')
-        payload: JSON payload for POST requests
-        timeout: Request timeout in seconds
+        method: HTTP method (GET, POST)
+        path: API path
+        payload: JSON payload for POST
+        timeout: Request timeout
         
     Returns:
-        Dict containing response JSON
+        Response JSON
         
     Raises:
-        requests.RequestException: On request failure
+        RuntimeError: On request failure
     """
-    url = build_url(path)
+    url = f"{SWARMUI_API_URL.rstrip('/')}/{path.lstrip('/')}"
     
-    if method.upper() == 'GET':
-        response = session.get(url, timeout=timeout)
-    elif method.upper() == 'POST':
-        response = session.post(url, json=payload or {}, timeout=timeout)
-    else:
-        raise ValueError(f"Unsupported HTTP method: {method}")
-    
-    response.raise_for_status()
-    
-    if not response.content:
-        return {}
-    
-    return response.json()
+    try:
+        if method.upper() == 'GET':
+            response = session.get(url, timeout=timeout)
+        elif method.upper() == 'POST':
+            response = session.post(url, json=payload or {}, timeout=timeout)
+        else:
+            raise ValueError(f"Unsupported method: {method}")
+        
+        response.raise_for_status()
+        return response.json() if response.content else {}
+        
+    except Exception as e:
+        raise RuntimeError(f"SwarmUI request failed: {e}")
 
 
 def get_session_id() -> Optional[str]:
     """Get a new SwarmUI session ID.
     
     Returns:
-        Session ID string or None if failed
+        Session ID or None if failed
     """
     try:
-        data = swarm_request('POST', '/API/GetNewSession')
-        session_id = data.get('session_id')
-        
-        if session_id:
-            Log.info(f"Session: {session_id[:16]}...")
-            return session_id
-        
-        Log.error("No session_id in response")
-        return None
-        
+        data = swarm_request('POST', '/API/GetNewSession', timeout=10)
+        return data.get('session_id')
     except Exception as e:
         Log.error(f"Failed to get session: {e}")
         return None
@@ -133,7 +130,7 @@ def check_backend_ready() -> bool:
     """Check if SwarmUI backend is ready for generation.
     
     Returns:
-        True if backend ready, False otherwise
+        True if backend ready
     """
     try:
         session_id = get_session_id()
@@ -143,7 +140,7 @@ def check_backend_ready() -> bool:
         # Test with minimal generation request
         test_payload = {
             'session_id': session_id,
-            'images': 0,  # Don't actually generate
+            'images': 1,
             'prompt': 'warmup',
             'model': 'OfficialStableDiffusion/sd_xl_base_1.0',
             'steps': 1,
@@ -159,16 +156,17 @@ def check_backend_ready() -> bool:
 
 
 def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
-    """Wait for SwarmUI to become ready for generation.
+    """Wait for SwarmUI to become ready.
     
     Args:
-        max_wait_seconds: Maximum time to wait
+        max_wait_seconds: Maximum wait time
         
     Returns:
         True if ready, False if timeout
     """
     Log.header("Waiting for SwarmUI to be ready")
     Log.info(f"URL: {SWARMUI_API_URL}")
+    Log.info(f"Public URL: {get_public_url()}")
     Log.info(f"Max wait: {max_wait_seconds}s")
     
     start_time = time.time()
@@ -204,14 +202,81 @@ def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
     return False
 
 
-def action_ready(job_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Check if SwarmUI is ready and return status info.
+def action_wakeup(job_input: Dict[str, Any]) -> Dict[str, Any]:
+    """Wake up worker and return connection info.
     
     Args:
-        job_input: Job input (unused)
+        job_input: Optional duration for keepalive (seconds)
         
     Returns:
-        Dict with ready status and SwarmUI info
+        Dict with public URL and session info
+    """
+    try:
+        # Get session to verify SwarmUI is ready
+        session_info = swarm_request('POST', '/API/GetNewSession', timeout=10)
+        session_id = session_info.get('session_id')
+        
+        if not session_id:
+            return {
+                'success': False,
+                'error': 'SwarmUI not ready'
+            }
+        
+        # Get keepalive duration
+        duration = int(job_input.get('duration', 3600))  # Default 1 hour
+        interval = int(job_input.get('interval', 30))     # Default 30s
+        
+        public_url = get_public_url()
+        
+        Log.info(f"Worker ready - Public URL: {public_url}")
+        Log.info(f"Starting keepalive for {duration}s (interval: {interval}s)")
+        
+        # Start keepalive loop (blocks for duration)
+        pings = 0
+        failures = 0
+        end_time = time.time() + duration
+        
+        while time.time() < end_time:
+            try:
+                swarm_request('POST', '/API/GetNewSession', timeout=10)
+                pings += 1
+            except Exception as e:
+                failures += 1
+                Log.warning(f"Keepalive ping failed: {e}")
+            
+            time.sleep(interval)
+        
+        Log.info(f"Keepalive complete: {pings} pings, {failures} failures")
+        
+        return {
+            'success': True,
+            'public_url': public_url,
+            'session_id': session_id,
+            'version': session_info.get('version', 'unknown'),
+            'worker_id': RUNPOD_POD_ID,
+            'keepalive': {
+                'duration': duration,
+                'pings': pings,
+                'failures': failures
+            }
+        }
+        
+    except Exception as e:
+        Log.error(f"Wakeup failed: {e}")
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def action_ready(job_input: Dict[str, Any]) -> Dict[str, Any]:
+    """Check if SwarmUI is ready and return connection info.
+    
+    Args:
+        job_input: Unused
+        
+    Returns:
+        Dict with ready status and connection info
     """
     try:
         session_info = swarm_request('POST', '/API/GetNewSession', timeout=10)
@@ -227,9 +292,10 @@ def action_ready(job_input: Dict[str, Any]) -> Dict[str, Any]:
         
         return {
             'ready': backend_ready,
+            'public_url': get_public_url(),
             'session_id': session_id,
             'version': session_info.get('version', 'unknown'),
-            'api_url': SWARMUI_API_URL
+            'worker_id': RUNPOD_POD_ID
         }
         
     except Exception as e:
@@ -243,38 +309,36 @@ def action_health(job_input: Dict[str, Any]) -> Dict[str, Any]:
     """Quick health check.
     
     Args:
-        job_input: Job input (unused)
+        job_input: Unused
         
     Returns:
         Dict with health status
     """
     try:
         swarm_request('POST', '/API/GetNewSession', timeout=5)
-        return {'healthy': True}
+        return {
+            'healthy': True,
+            'public_url': get_public_url(),
+            'worker_id': RUNPOD_POD_ID
+        }
     except Exception as e:
-        return {'healthy': False, 'error': str(e)}
+        return {
+            'healthy': False,
+            'error': str(e)
+        }
 
 
 def action_keepalive(job_input: Dict[str, Any]) -> Dict[str, Any]:
     """Keep worker warm by pinging SwarmUI.
     
     Args:
-        job_input: Must contain 'duration' (seconds) and optional 'interval' (seconds)
+        job_input: duration (seconds), interval (seconds)
         
     Returns:
         Dict with keepalive results
     """
-    duration = job_input.get('duration', 60)
-    interval = job_input.get('interval', CHECK_INTERVAL)
-    
-    try:
-        duration = int(duration)
-        interval = int(interval)
-    except (TypeError, ValueError):
-        return {
-            'success': False,
-            'error': 'duration and interval must be integers'
-        }
+    duration = int(job_input.get('duration', 3600))  # Default 1 hour
+    interval = int(job_input.get('interval', 30))    # Default 30s
     
     if duration <= 0:
         return {
@@ -283,11 +347,12 @@ def action_keepalive(job_input: Dict[str, Any]) -> Dict[str, Any]:
         }
     
     interval = max(1, interval)
-    end_time = time.time() + duration
+    
+    Log.info(f"Keepalive started: {duration}s (interval: {interval}s)")
+    
     pings = 0
     failures = 0
-    
-    Log.info(f"Keeping alive for {duration}s (interval: {interval}s)")
+    end_time = time.time() + duration
     
     while time.time() < end_time:
         try:
@@ -298,8 +363,12 @@ def action_keepalive(job_input: Dict[str, Any]) -> Dict[str, Any]:
         
         time.sleep(interval)
     
+    Log.info(f"Keepalive complete: {pings} pings, {failures} failures")
+    
     return {
         'success': True,
+        'public_url': get_public_url(),
+        'worker_id': RUNPOD_POD_ID,
         'pings': pings,
         'failures': failures,
         'duration': duration,
@@ -307,66 +376,11 @@ def action_keepalive(job_input: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def action_swarm_api(job_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Forward request to SwarmUI API.
-    
-    Args:
-        job_input: Must contain:
-            - method: HTTP method (GET, POST)
-            - path: SwarmUI API path (e.g., '/API/GenerateText2Image')
-            - payload: Optional JSON payload for POST requests
-            - timeout: Optional request timeout (default: 600s)
-            
-    Returns:
-        Dict containing SwarmUI API response
-    """
-    method = job_input.get('method', 'POST')
-    path = job_input.get('path')
-    payload = job_input.get('payload')
-    timeout = job_input.get('timeout', 600)
-    
-    if not path:
-        return {
-            'success': False,
-            'error': 'path is required'
-        }
-    
-    try:
-        timeout = int(timeout)
-    except (TypeError, ValueError):
-        return {
-            'success': False,
-            'error': 'timeout must be an integer'
-        }
-    
-    try:
-        response = swarm_request(method, path, payload, timeout)
-        return {
-            'success': True,
-            'response': response
-        }
-    except requests.exceptions.Timeout:
-        return {
-            'success': False,
-            'error': f'Request timed out after {timeout}s'
-        }
-    except requests.exceptions.HTTPError as e:
-        return {
-            'success': False,
-            'error': f'HTTP {e.response.status_code}: {e.response.text}'
-        }
-    except Exception as e:
-        return {
-            'success': False,
-            'error': str(e)
-        }
-
-
 def action_shutdown(job_input: Dict[str, Any]) -> Dict[str, Any]:
     """Signal graceful shutdown.
     
     Args:
-        job_input: Job input (unused)
+        job_input: Unused
         
     Returns:
         Dict with shutdown acknowledgment
@@ -374,7 +388,8 @@ def action_shutdown(job_input: Dict[str, Any]) -> Dict[str, Any]:
     Log.warning("Shutdown signal received")
     return {
         'success': True,
-        'message': 'Shutdown acknowledged'
+        'message': 'Shutdown acknowledged',
+        'worker_id': RUNPOD_POD_ID
     }
 
 
@@ -389,25 +404,25 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         job_input = job.get('input', {})
-        action = job_input.get('action', 'ready')
+        action = job_input.get('action', 'wakeup')
         
         Log.info(f"Action: {action}")
         
-        if action == 'ready':
+        if action == 'wakeup':
+            return action_wakeup(job_input)
+        elif action == 'ready':
             return action_ready(job_input)
         elif action == 'health':
             return action_health(job_input)
         elif action == 'keepalive':
             return action_keepalive(job_input)
-        elif action == 'swarm_api':
-            return action_swarm_api(job_input)
         elif action == 'shutdown':
             return action_shutdown(job_input)
         else:
             return {
                 'success': False,
                 'error': f'Unknown action: {action}',
-                'available_actions': ['ready', 'health', 'keepalive', 'swarm_api', 'shutdown']
+                'available_actions': ['wakeup', 'ready', 'health', 'keepalive', 'shutdown']
             }
             
     except Exception as e:
@@ -420,7 +435,7 @@ def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    Log.header("SwarmUI RunPod Serverless Worker")
+    Log.header("SwarmUI RunPod Serverless Worker - Direct URL Access")
     
     if not wait_for_swarmui_ready():
         Log.error("SwarmUI failed to start")
@@ -428,5 +443,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     Log.header("System Ready - Starting RunPod Handler")
+    Log.info(f"Public URL: {get_public_url()}")
+    Log.info(f"Worker ID: {RUNPOD_POD_ID}")
     
     runpod.serverless.start({"handler": handler})
