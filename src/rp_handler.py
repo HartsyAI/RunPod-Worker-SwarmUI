@@ -1,4 +1,4 @@
-"""RunPod Handler for SwarmUI Serverless Worker - Direct URL Access.
+"""RunPod Handler for SwarmUI Serverless Worker.
 
 Workflow:
 1. Send wakeup/keepalive request to start worker
@@ -12,21 +12,16 @@ import os
 import sys
 import time
 import traceback
-from typing import Dict, Any, Optional
-
 import requests
 import runpod
 
-# Configuration
+from typing import Dict, Any, Optional
+
 SWARMUI_API_URL = os.getenv('SWARMUI_API_URL', 'http://127.0.0.1:7801')
 SWARMUI_PORT = os.getenv('SWARMUI_PORT', '7801')
 STARTUP_TIMEOUT = int(os.getenv('STARTUP_TIMEOUT', '1800'))
 CHECK_INTERVAL = 10
-
-# Get worker ID from RunPod environment
 RUNPOD_POD_ID = os.getenv('RUNPOD_POD_ID', 'unknown')
-
-# HTTP session with retries
 session = requests.Session()
 adapter = requests.adapters.HTTPAdapter(
     max_retries=requests.adapters.Retry(
@@ -42,7 +37,6 @@ session.headers.update({
     'User-Agent': 'SwarmUI-RunPod-Worker/2.0',
     'Content-Type': 'application/json'
 })
-
 
 class Log:
     """Simple logging utility."""
@@ -126,35 +120,6 @@ def get_session_id() -> Optional[str]:
         return None
 
 
-def check_backend_ready() -> bool:
-    """Check if SwarmUI backend is ready for generation.
-    
-    Returns:
-        True if backend ready
-    """
-    try:
-        session_id = get_session_id()
-        if not session_id:
-            return False
-        
-        # Test with minimal generation request
-        test_payload = {
-            'session_id': session_id,
-            'images': 1,
-            'prompt': 'warmup',
-            'model': 'OfficialStableDiffusion/sd_xl_base_1.0',
-            'steps': 1,
-            'width': 512,
-            'height': 512
-        }
-        
-        swarm_request('POST', '/API/GenerateText2Image', test_payload, timeout=10)
-        return True
-        
-    except Exception:
-        return False
-
-
 def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
     """Wait for SwarmUI to become ready.
     
@@ -168,36 +133,27 @@ def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
     Log.info(f"URL: {SWARMUI_API_URL}")
     Log.info(f"Public URL: {get_public_url()}")
     Log.info(f"Max wait: {max_wait_seconds}s")
-    
     start_time = time.time()
     max_attempts = max(1, max_wait_seconds // CHECK_INTERVAL)
-    
     for attempt in range(max_attempts):
         elapsed = int(time.time() - start_time)
-        
         try:
             session_info = swarm_request('POST', '/API/GetNewSession', timeout=10)
             session_id = session_info.get('session_id')
-            
             if session_id:
-                if check_backend_ready():
-                    Log.success(f"SwarmUI ready after {elapsed}s")
-                    version = session_info.get('version', 'unknown')
-                    Log.info(f"Version: {version}")
-                    return True
-                else:
-                    Log.info(f"[{elapsed:4d}s] Backend warming up...")
+                Log.success(f"SwarmUI API ready after {elapsed}s")
+                version = session_info.get('version', 'unknown')
+                Log.info(f"Version: {version}")
+                Log.info("Note: Backend models will load on-demand when first generation is requested")
+                return True
             else:
                 Log.info(f"[{elapsed:4d}s] Waiting for valid session...")
-                
         except Exception as e:
             Log.info(f"[{elapsed:4d}s] Connecting: {e}")
         
         if elapsed >= max_wait_seconds:
             break
-        
         time.sleep(CHECK_INTERVAL)
-    
     Log.error(f"SwarmUI not ready after {max_wait_seconds}s")
     return False
 
@@ -288,10 +244,8 @@ def action_ready(job_input: Dict[str, Any]) -> Dict[str, Any]:
                 'error': 'No session available'
             }
         
-        backend_ready = check_backend_ready()
-        
         return {
-            'ready': backend_ready,
+            'ready': True,
             'public_url': get_public_url(),
             'session_id': session_id,
             'version': session_info.get('version', 'unknown'),
