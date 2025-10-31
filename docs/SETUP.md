@@ -11,7 +11,7 @@ Comprehensive first-time setup instructions for deploying SwarmUI on RunPod Serv
 3. [Create Network Volume](#create-network-volume)
 4. [Deploy Container Image](#deploy-container-image)
 5. [Configure Environment](#configure-environment)
-6. [Trigger First Installation](#trigger-first-installation)
+6. [First-Time Installation](#first-time-installation)
 7. [Upload Models (Optional)](#upload-models-optional)
 8. [Test the Deployment](#test-the-deployment)
 9. [Next Steps](#next-steps)
@@ -22,7 +22,7 @@ Comprehensive first-time setup instructions for deploying SwarmUI on RunPod Serv
 
 **Required:**
 - Credit card or payment method for RunPod
-- Python 3.11+ (for testing)
+- Python 3.7+ (for testing)
 - Git
 - Basic command line knowledge
 
@@ -57,11 +57,12 @@ Comprehensive first-time setup instructions for deploying SwarmUI on RunPod Serv
 4. Add initial credits (minimum $10 recommended)
 
 **Pricing:**
-- RTX 4090: ~$0.89/hour (~$0.015/minute)
-- A100 40GB: ~$1.89/hour
+- RTX 4000 Ada (20GB): ~$0.39/hour - **Recommended for initial setup**
+- RTX 4090 (24GB): ~$0.89/hour - Good for SDXL production
+- A100 40GB: ~$1.89/hour - Good for Flux production
 - Network volume: ~$0.07/GB/month
 
-**Tip:** Start with $25-50 credits for testing.
+**Tip:** Start with $25-50 credits for testing. Initial setup costs ~$0.20 if using RTX 4000 Ada.
 
 ### Step 3: Get API Key
 
@@ -160,10 +161,20 @@ docker push youruser/swarmui-runpod:latest
 - **Docker Command:** Leave empty (uses CMD from Dockerfile)
 
 **GPU Configuration:**
-- **GPU Type:** 
-  - RTX 4090 (24GB) - Good for SDXL ($0.89/hr)
-  - A100 40GB - Good for Flux ($1.89/hr)
-  - A100 80GB - For large models ($3.19/hr)
+
+**⚠️ IMPORTANT: For first-time setup, use a cheap GPU:**
+
+- **GPU Type:** **RTX 4000 Ada (20GB)** or **RTX A4000 (16GB)**
+  - These cost ~$0.39-0.45/hour
+  - First installation takes 20-30 minutes
+  - Initial setup cost: ~$0.20
+  
+**After installation is complete, you can change to production GPUs:**
+- **RTX 4090 (24GB)** - ~$0.89/hr - Good for SDXL
+- **A100 40GB** - ~$1.89/hr - Good for Flux
+- **A100 80GB** - ~$3.19/hr - For large models
+
+**Other Settings:**
 - **Active Workers:** `0` (cold start on demand)
 - **Max Workers:** `3`
 - **Idle Timeout:** `120` seconds
@@ -203,9 +214,13 @@ https://api.runpod.ai/v2/{ENDPOINT_ID}/runsync
 
 ---
 
-## Trigger First Installation
+## First-Time Installation
 
-First run downloads and installs SwarmUI + ComfyUI to network volume.
+**⚠️ CRITICAL: First run requires manual ComfyUI installation**
+
+The initial setup has two phases:
+1. Automatic SwarmUI installation (~5 minutes)
+2. Manual ComfyUI installation via UI (~15-20 minutes)
 
 ### Step 1: Configure Local Environment
 
@@ -233,7 +248,7 @@ RUNPOD_API_TOKEN=your-api-key-here
 ### Step 2: Start Installation
 
 ```bash
-python scripts/trigger_install.py
+python trigger_install.py
 ```
 
 **Expected output:**
@@ -248,34 +263,163 @@ Max wait: 1800s (30 minutes)
 Note: First install takes 20-30 minutes
       Subsequent starts take 60-90 seconds
 
-[  145s] Waiting: Not ready
-[  160s] Waiting: Backend warming
+[   45s] Waiting: Not ready
+[   60s] Waiting: Backend warming
 ...
-✓ SwarmUI ready after 1247s (20 minutes)
+✓ SwarmUI ready after 320s (5 minutes)
+  Version: 0.6.5-Beta
+  Session: 9D3534E30DA3...
 ```
 
-**What's happening:**
-1. Downloads SwarmUI installer (~5s)
-2. Clones SwarmUI repository (~30s)
-3. Installs SwarmUI (~2 min)
-4. Downloads PyTorch (~3 min)
-5. Installs ComfyUI (~5 min)
-6. Builds and starts SwarmUI (~3 min)
+**Phase 1: Automatic SwarmUI Installation (~5 minutes)**
 
-**Total time: 20-30 minutes** (first run only!)
+What happens automatically:
+1. Downloads SwarmUI installer
+2. Clones SwarmUI repository
+3. Installs SwarmUI
+4. Downloads PyTorch
+5. Starts SwarmUI server
 
-### Troubleshooting Installation
+When you see "SwarmUI ready", the script will show you the public URL:
+```
+================================================================================
+✓ Installation Complete - Worker Ready
+================================================================================
 
-**Timeout after 30 minutes:**
-- Check RunPod dashboard logs
-- Verify network volume has 15GB+ free space
-- Ensure container disk is 15GB+
-- Try again - sometimes network is slow
+Public URL: https://abc123-7801.proxy.runpod.net
 
-**Connection errors:**
-- Verify endpoint ID is correct
-- Check API key is valid
-- Ensure endpoint is active in dashboard
+IMPORTANT: You must manually install ComfyUI:
+1. Open the URL above in your browser
+2. Click "Install ComfyUI Backend"
+3. Accept the terms and conditions
+4. Wait for installation to complete (15-20 minutes)
+```
+
+### Step 3: Manual ComfyUI Installation
+
+**⚠️ REQUIRED: You must do this step manually**
+
+1. **Open the public URL in your browser:**
+   ```
+   https://abc123-7801.proxy.runpod.net
+   ```
+
+2. **You will see SwarmUI interface**
+   - Look for "Install ComfyUI" button or prompt
+   - Click the button
+
+3. **Accept Terms:**
+   - Read and accept ComfyUI terms and conditions
+   - Click "Install" or "Accept and Install"
+
+4. **Wait for installation:**
+   - Installation takes 15-20 minutes
+   - Progress will show in the UI
+   - **DO NOT close the browser or stop the worker**
+
+5. **Set Logs to Debug (Recommended):**
+   - In SwarmUI, go to Settings
+   - Find "Log Level" setting
+   - Set to **"Debug"**
+   - This helps diagnose if installation hangs
+
+### Step 4: Monitor Installation
+
+**Check installation progress:**
+- SwarmUI UI will show progress bars
+- Check RunPod dashboard logs for detailed output
+- Debug logs show exactly what's happening
+
+**Installation steps (visible in logs):**
+```
+[INFO] Starting ComfyUI installation...
+[INFO] Downloading ComfyUI...
+[INFO] Installing Python packages...
+[INFO] Installing PyTorch...
+[INFO] Building ComfyUI...
+[INFO] Testing ComfyUI...
+[SUCCESS] ComfyUI installation complete!
+```
+
+### Step 5: Handle Installation Issues
+
+**⚠️ Known Issue: ComfyUI Installation Sometimes Hangs**
+
+**Symptoms:**
+- Progress bar stops moving for >5 minutes
+- No new logs appearing
+- UI becomes unresponsive
+
+**Solution:**
+
+1. **Check if truly stuck:**
+   - Look at debug logs in SwarmUI UI
+   - Check RunPod dashboard logs
+   - Wait at least 5 minutes (downloads can be slow)
+
+2. **If stuck, restart the worker:**
+   - Go to RunPod dashboard
+   - Find your active worker
+   - Click "Terminate" or "Stop"
+   - Wait for worker to stop
+
+3. **Run installation again:**
+   ```bash
+   python trigger_install.py
+   ```
+   - Open public URL again
+   - Install ComfyUI again
+   - Usually works within 2-3 attempts
+
+**Why this happens:**
+- Likely RunPod network issue
+- Large file downloads timing out
+- PyTorch install sometimes gets stuck
+- Not your fault - it's a known issue
+
+**Tips:**
+- Try at different times of day
+- US regions tend to be more stable
+- Debug logs help identify exactly where it's stuck
+
+### Step 6: Verify Installation
+
+**After ComfyUI installation completes:**
+
+1. **SwarmUI should show:**
+   - "ComfyUI Backend: Active"
+   - Green status indicator
+   - Models available in dropdown
+
+2. **Test generation:**
+   - Enter a simple prompt: "a red ball"
+   - Select a model (SDXL Base)
+   - Click Generate
+   - Should work within 30-60 seconds
+
+3. **Check logs:**
+   ```
+   [SUCCESS] Backend initialized
+   [SUCCESS] Model loaded: sd_xl_base_1.0
+   [INFO] Generation started
+   [SUCCESS] Image generated
+   ```
+
+**If test generation works, installation is complete! 🎉**
+
+### Installation Complete
+
+**What you now have:**
+- ✅ SwarmUI installed on network volume
+- ✅ ComfyUI backend installed and working
+- ✅ Default models available
+- ✅ Future startups take only 60-90 seconds
+
+**Next steps:**
+1. Change GPU to more powerful one (RTX 4090 or A100)
+2. Upload custom models (optional)
+3. Test with your SwarmUI extension
+4. Start generating!
 
 ---
 
@@ -350,11 +494,11 @@ Requires S3 credentials from volume settings. See RunPod documentation.
 ### Test 1: Health Check
 
 ```bash
-python tests/test_direct_url.py --duration 600
+python test_direct_url.py --duration 600
 ```
 
 **Expected:**
-- ✓ Worker starts (60-90s)
+- ✓ Worker starts (60-90s after initial setup)
 - ✓ Public URL obtained
 - ✓ Direct SwarmUI calls work
 - ✓ Image generation successful
@@ -362,7 +506,7 @@ python tests/test_direct_url.py --duration 600
 ### Test 2: Simple Generation
 
 ```python
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 
 client = SwarmUIClient("your-endpoint", "your-key")
 
@@ -400,10 +544,10 @@ print(f"Available models: {len(models.get('files', []))}")
 **Initial Setup:**
 - Free (just account creation)
 
-**First Run:**
-- ~20-30 minutes installation
-- RTX 4090: ~$0.45-0.75
-- A100: ~$0.95-1.40
+**First Installation (RTX 4000 Ada):**
+- ~30 minutes × $0.39/hr = ~$0.20
+
+**After Setup (Normal Usage):**
 
 **Per Generation:**
 - 1024x1024, 30 steps, RTX 4090: ~$0.01
@@ -411,7 +555,7 @@ print(f"Available models: {len(models.get('files', []))}")
 
 **Monthly Costs (if used daily):**
 - Network volume (100GB): ~$7/month
-- GPU usage (1 hour/day): ~$27/month
+- GPU usage (1 hour/day, RTX 4090): ~$27/month
 - **Total: ~$34/month**
 
 **Tips to reduce costs:**
@@ -419,6 +563,7 @@ print(f"Available models: {len(models.get('files', []))}")
 - Shutdown when done
 - Use smaller resolutions for testing
 - Use faster models (SDXL Turbo, Flux Schnell)
+- Use RTX 4000 Ada instead of RTX 4090 when possible
 
 ---
 
@@ -443,6 +588,14 @@ print(f"Available models: {len(models.get('files', []))}")
 - Reduce batch size
 - Use appropriate GPU (SDXL needs 24GB+)
 - Try quantized models (GGUF)
+
+### Issue: "ComfyUI installation hangs"
+**Solution:**
+- Set logs to Debug in SwarmUI UI
+- Check what step it's stuck on
+- Wait at least 5 minutes (downloads are slow)
+- Restart worker and try again
+- Usually works within 2-3 attempts
 
 ### Issue: "Cannot access public URL"
 **Solution:**
@@ -480,7 +633,7 @@ Now that your worker is deployed:
 
 **Ready to generate?**
 ```python
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 
 client = SwarmUIClient("your-endpoint", "your-key")
 public_url = client.wakeup(duration=3600)
@@ -516,10 +669,10 @@ You now have:
 - ✅ RunPod account with credits
 - ✅ Network volume configured
 - ✅ Serverless endpoint deployed
-- ✅ SwarmUI installed and tested
+- ✅ SwarmUI + ComfyUI installed and tested
 - ✅ Working code examples
 
-**First run:** 20-30 minutes  
+**First installation:** 20-30 minutes  
 **Warm starts:** 60-90 seconds  
 **Cost per image:** ~$0.01 (RTX 4090)
 

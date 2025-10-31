@@ -9,15 +9,16 @@ This serverless worker exposes SwarmUI on a public URL so you can access its API
 ## 📚 Documentation
 
 **Getting Started:**
-1. **[Workflow Guide](docs/WORKFLOW.md)** - Complete step-by-step workflow walkthrough
-2. **[Client Usage Guide](docs/CLIENT.md)** - Using the Python client class
-3. **[SwarmUI API Reference](docs/SWARMUI_API.md)** - Complete API documentation
+1. **[Setup Guide](SETUP.md)** ⭐ Start here for first-time deployment
+2. **[Workflow Guide](WORKFLOW.md)** - Complete step-by-step workflow walkthrough
+3. **[Client Usage Guide](CLIENT.md)** - Using the Python client class
+4. **[SwarmUI API Reference](SWARMUI_API.md)** - Complete API documentation
 
 **Quick links:**
 - [How It Works](#how-it-works)
 - [Quick Start](#quick-start)
-- [Complete Example](#complete-example)
 - [Handler API](#handler-api)
+- [Complete Example](#complete-example)
 - [Testing](#testing)
 
 ---
@@ -43,7 +44,7 @@ https://{worker-id}-7801.proxy.runpod.net
 
 You can access SwarmUI directly at this URL while the worker is alive.
 
-**👉 For complete workflow details, see the [Workflow Guide](docs/WORKFLOW.md)**
+**💡 For complete workflow details, see the [Workflow Guide](WORKFLOW.md)**
 
 ---
 
@@ -51,17 +52,72 @@ You can access SwarmUI directly at this URL while the worker is alive.
 
 ### 1. Deploy Endpoint
 
+**⚠️ Important for First Setup:**
+Use a **cheap GPU** for initial installation (takes 20-30 minutes). You can change to more powerful GPUs later.
+
+Recommended for first setup:
+- **RTX 4000 Ada** (20GB) - ~$0.39/hour
+- **RTX A4000** (16GB) - ~$0.45/hour
+
+For production use (after setup):
+- **RTX 4090** (24GB) - ~$0.89/hour - Good for SDXL
+- **A100 40GB** - ~$1.89/hour - Good for Flux
+
+**Setup Steps:**
+
 1. Go to [RunPod Serverless](https://runpod.io/console/serverless)
-2. Create endpoint with this Docker image
+2. Create endpoint with this Docker image: `youruser/swarmui-runpod:latest`
 3. Attach a network volume (100GB+)
 4. Configure:
-   - GPU: RTX 4090 (24GB) or A100 (40GB+)
+   - GPU: **RTX 4000 Ada** (for initial setup)
    - Active Workers: 0
    - Max Workers: 3
    - Idle Timeout: 120s
    - FlashBoot: Enabled
 
-### 2. Wake Up Worker
+**💡 For complete setup instructions, see the [Setup Guide](SETUP.md)**
+
+### 2. First-Time Installation (20-30 minutes)
+
+**The first run installs SwarmUI and requires manual ComfyUI installation:**
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure environment
+cp .env.example .env
+# Edit .env with your endpoint ID and API key
+
+# Start first installation
+python trigger_install.py
+```
+
+**What happens:**
+1. Worker starts and installs SwarmUI (~5 minutes)
+2. Script shows public URL
+3. **You must manually open the URL in browser**
+4. **Click "Install ComfyUI" and accept terms in SwarmUI UI**
+5. Wait for ComfyUI installation to complete (~15-20 minutes)
+
+**⚠️ Known Issue: ComfyUI Install Hangs**
+
+If the ComfyUI installation appears to hang:
+1. Set logs to **Debug** in SwarmUI UI to check status
+2. If truly stuck, restart the worker via RunPod dashboard
+3. Run `python trigger_install.py` again
+4. Repeat ComfyUI installation until it completes
+
+This is a known issue (likely RunPod network related). Usually succeeds within 2-3 attempts.
+
+**After first installation is complete:**
+- SwarmUI + ComfyUI stored on network volume
+- Future starts take only 60-90 seconds
+- You can change to more powerful GPU in RunPod settings
+
+### 3. Wake Up Worker
+
+**After initial setup, normal usage:**
 
 ```python
 import requests
@@ -90,9 +146,9 @@ print(f"SwarmUI URL: {public_url}")
 
 **Note:** The wakeup request blocks for the full duration (1 hour in this case) to keep the worker alive. Start it in a background thread if needed.
 
-**👉 Want a simpler way? Check out the [Client Usage Guide](docs/CLIENT.md) for a ready-to-use Python class**
+**💡 Want a simpler way? Check out the [Client Usage Guide](CLIENT.md) for a ready-to-use Python class**
 
-### 3. Make Direct SwarmUI API Calls
+### 4. Make Direct SwarmUI API Calls
 
 ```python
 # Get session
@@ -117,7 +173,9 @@ images = response.json()["images"]
 print(f"Generated: {images}")
 ```
 
-### 4. Shutdown When Done
+**💡 For all available SwarmUI endpoints, see the [SwarmUI API Reference](SWARMUI_API.md)**
+
+### 5. Shutdown When Done
 
 ```python
 requests.post(
@@ -128,16 +186,14 @@ requests.post(
 )
 ```
 
-**👉 For all available SwarmUI endpoints, see the [SwarmUI API Reference](docs/SWARMUI_API.md)**
-
 ---
 
 ## Complete Example
 
-See `examples/client.py` for a reusable client class:
+See `example_client.py` for a reusable client class:
 
 ```python
-from client import SwarmUIClient
+from example_client import SwarmUIClient
 
 # Initialize
 client = SwarmUIClient("your-endpoint", "your-key")
@@ -162,11 +218,13 @@ images = client.generate_image(
 client.shutdown()
 ```
 
-**👉 This example uses our pre-built client. For manual implementation details, see the [Workflow Guide](docs/WORKFLOW.md)**
+**💡 This example uses our pre-built client. For manual implementation details, see the [Workflow Guide](WORKFLOW.md)**
 
 ---
 
 ## Handler API
+
+The handler provides simple actions for worker management. All responses include worker status and public URL.
 
 ### `wakeup` - Start Worker and Get URL
 
@@ -343,7 +401,7 @@ curl -X POST https://abc123-7801.proxy.runpod.net/API/GenerateText2Image \
 
 **Full API documentation:** [SwarmUI API Docs](https://github.com/mcmonkeyprojects/SwarmUI/blob/master/docs/API.md)
 
-**👉 For detailed parameter descriptions and more endpoints, see our [SwarmUI API Reference](docs/SWARMUI_API.md)**
+**💡 For detailed parameter descriptions and more endpoints, see our [SwarmUI API Reference](SWARMUI_API.md)**
 
 ---
 
@@ -358,10 +416,10 @@ cp .env.example .env
 # Edit .env with your credentials
 
 # Run complete workflow test
-python tests/test_direct_url.py --duration 600  # 10 minutes
+python test_direct_url.py --duration 600  # 10 minutes
 
 # Send shutdown
-python tests/test_direct_url.py --shutdown
+python test_direct_url.py --shutdown
 ```
 
 ---
@@ -369,8 +427,9 @@ python tests/test_direct_url.py --shutdown
 ## Cold Start Times
 
 **First Run (initial install):**
-- SwarmUI + ComfyUI installation: 20-30 minutes
-- Stored on network volume, only happens once
+- SwarmUI installation: ~5 minutes
+- ComfyUI installation: ~15-20 minutes (requires manual installation in UI)
+- **Total: 20-30 minutes** (stored on network volume, only happens once)
 
 **Subsequent Runs:**
 - Worker startup: 60-90 seconds
@@ -436,14 +495,18 @@ public_url = result["public_url"]
 
 **Tips:**
 - Use appropriate keepalive duration (don't over-allocate)
-- RTX 4090: ~$0.89/hour (~$0.015/minute)
+- Use cheap GPU (RTX 4000 Ada ~$0.39/hour) for initial setup
+- Use appropriate GPU for workload:
+  - RTX 4090 (~$0.89/hour) for SDXL
+  - A100 40GB (~$1.89/hour) for Flux
 - Shutdown explicitly when done
 - Monitor active workers in RunPod dashboard
 
 **Example costs:**
-- 10-minute session: ~$0.15
-- 1-hour session: ~$0.89
-- 5 images @ 30s each: ~$0.03
+- Initial setup (30 min on RTX 4000 Ada): ~$0.20
+- 10-minute session (RTX 4090): ~$0.15
+- 1-hour session (RTX 4090): ~$0.89
+- 5 images @ 30s each (RTX 4090): ~$0.03
 
 ---
 
@@ -453,6 +516,13 @@ public_url = result["public_url"]
 - Check logs in RunPod dashboard
 - Verify network volume has 15GB+ free space
 - First install takes 20-30 minutes
+
+### ComfyUI installation hangs
+- Set logs to **Debug** in SwarmUI UI
+- Check status in debug logs
+- If stuck, restart worker via RunPod dashboard
+- Run installation again (usually works within 2-3 attempts)
+- This is a known issue, likely network-related
 
 ### Can't access public URL
 - Verify worker is still alive (within keepalive duration)
@@ -495,19 +565,15 @@ https://{worker-id}-7801.proxy.runpod.net
 
 ```
 /
-├── src/
-│   └── rp_handler.py              # Handler with direct URL support
-├── scripts/
-│   ├── start.sh                    # SwarmUI startup script
-│   └── trigger_install.py          # First-time installation helper
-├── tests/
-│   └── test_direct_url.py          # Complete workflow test
-├── examples/
-│   └── client.py                   # Reusable Python client
-├── docs/
-│   ├── ARCHITECTURE.md             # Design details
-│   ├── QUICKSTART.md               # Fast start guide
-│   └── API.md                      # Complete API reference
+├── rp_handler.py                  # Handler with direct URL support
+├── start.sh                        # SwarmUI startup script
+├── trigger_install.py              # First-time installation helper
+├── test_direct_url.py              # Complete workflow test
+├── example_client.py               # Reusable Python client
+├── SETUP.md                        # Complete setup guide
+├── WORKFLOW.md                     # Step-by-step workflow
+├── CLIENT.md                       # Client usage guide
+├── SWARMUI_API.md                  # Complete API reference
 ├── Dockerfile                      # Container image
 ├── requirements.txt                # Python dependencies
 └── .env.example                    # Environment template
@@ -519,7 +585,15 @@ https://{worker-id}-7801.proxy.runpod.net
 
 Ready to dive deeper? Here's your learning path:
 
-### 1. **[Workflow Guide](docs/WORKFLOW.md)** ← Start here!
+### 1. **[Setup Guide](SETUP.md)** ⭐ Start here!
+First-time deployment walkthrough:
+- Creating RunPod account
+- Setting up network volume
+- Deploying the endpoint
+- First-time installation process
+- Troubleshooting installation issues
+
+### 2. **[Workflow Guide](WORKFLOW.md)**
 Complete step-by-step walkthrough:
 - How to wake up workers
 - Getting public URLs
@@ -527,7 +601,7 @@ Complete step-by-step walkthrough:
 - Batch generation patterns
 - Error handling and troubleshooting
 
-### 2. **[Client Usage Guide](docs/CLIENT.md)**
+### 3. **[Client Usage Guide](CLIENT.md)**
 Using our Python client class:
 - Quick start examples
 - API reference for all methods
@@ -535,7 +609,7 @@ Using our Python client class:
 - Error handling
 - Performance tips
 
-### 3. **[SwarmUI API Reference](docs/SWARMUI_API.md)**
+### 4. **[SwarmUI API Reference](SWARMUI_API.md)**
 Complete SwarmUI API documentation:
 - All available endpoints
 - Request/response formats

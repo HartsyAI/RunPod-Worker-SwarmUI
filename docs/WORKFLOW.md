@@ -1,4 +1,4 @@
-﻿# Direct URL Workflow Guide
+# Direct URL Workflow Guide
 
 Complete walkthrough of using the SwarmUI RunPod Serverless worker with direct URL access.
 
@@ -43,43 +43,38 @@ This worker provides **direct access** to SwarmUI's API running on a RunPod serv
 └──────────────────┘
 ```
 
+**📖 Related Documentation:**
+- **[Setup Guide](SETUP.md)** - First-time deployment
+- **[Client Usage Guide](CLIENT.md)** - Python client examples
+- **[SwarmUI API Reference](SWARMUI_API.md)** - Complete API docs
+
 ---
 
 ## Step-by-Step Workflow
 
-### Step 1: Deploy the Endpoint
+### Prerequisites
 
-**One-time setup** - Deploy the worker to RunPod Serverless.
-
-1. Go to [RunPod Serverless](https://runpod.io/console/serverless)
-2. Create new endpoint
-3. Use Docker image: `youruser/swarmui-runpod:latest`
-4. Attach network volume (100GB+)
-5. Configure:
-   - GPU: RTX 4090 (24GB) or A100 (40GB+)
-   - Active Workers: 0
-   - Max Workers: 3
-   - Idle Timeout: 120s
-   - FlashBoot: Enabled
-
-**Cost:** ~$0.89/hour for RTX 4090 (only when running)
+Before starting, ensure you have:
+- ✅ RunPod endpoint deployed ([Setup Guide](SETUP.md))
+- ✅ SwarmUI + ComfyUI installed (first-time setup complete)
+- ✅ Endpoint ID and API key
+- ✅ Python 3.7+ with `requests` installed
 
 ---
 
-### Step 2: Wake Up the Worker
+### Step 1: Wake Up the Worker
 
 Send a `wakeup` request to start the worker and get the public URL.
 
 **Request:**
 ```python
 import requests
+import threading
 
 endpoint_id = "your-endpoint-id"
 api_key = "your-api-key"
 
 # Start wakeup in background thread (blocks for duration)
-import threading
-
 def wakeup_worker():
     response = requests.post(
         f"https://api.runpod.ai/v2/{endpoint_id}/runsync",
@@ -126,12 +121,15 @@ if result.get("ready"):
 ```
 
 **Cold start timing:**
-- First run: 20-30 minutes (installs SwarmUI + ComfyUI)
-- Subsequent runs: 60-90 seconds (launches existing installation)
+- First run (after initial setup): 60-90 seconds
+- Within idle timeout (120s): Almost instant
+- From completely cold: 60-90 seconds
+
+**💡 Tip:** Use the Python client from [CLIENT.md](CLIENT.md) for easier worker management!
 
 ---
 
-### Step 3: Get the Public URL
+### Step 2: Get the Public URL
 
 The handler returns a public URL in this format:
 ```
@@ -173,7 +171,7 @@ https://{worker-id}-7801.proxy.runpod.net
 
 ---
 
-### Step 4: Get a SwarmUI Session
+### Step 3: Get a SwarmUI Session
 
 Before generating images, you need a session ID from SwarmUI.
 
@@ -203,16 +201,16 @@ print(f"Session: {session_id[:16]}...")
 ```
 
 **Session management:**
-- Sessions expire after inactivity
+- Sessions expire after inactivity (~1 hour)
 - Create one session per workflow
 - Reuse session for multiple generations
 - If you get `invalid_session_id` error, get a new session
 
 ---
 
-### Step 5: List Available Models (Optional)
+### Step 4: List Available Models (Optional)
 
-Check which models are loaded.
+Check which models are available on the worker.
 
 ```python
 response = requests.post(
@@ -242,11 +240,16 @@ for model in files[:5]:
 - `LoRA` - LoRA adapters
 - `VAE` - VAE models
 - `ControlNet` - ControlNet models
+- `Embedding` - Text embeddings
 - `Wildcards` - Prompt wildcards
+
+**Note:** Listing models does NOT load backends. Models are read from disk. Backends load on-demand when you first generate an image.
+
+**💡 See [SWARMUI_API.md](SWARMUI_API.md) for complete API documentation**
 
 ---
 
-### Step 6: Generate Images
+### Step 5: Generate Images
 
 Now you can generate images using SwarmUI's full API.
 
@@ -289,18 +292,27 @@ for img_path in images:
 **Common parameters:**
 - `prompt` - What to generate
 - `negative_prompt` - What to avoid
-- `model` - Model identifier
+- `model` - Model identifier (from ListModels)
 - `width` / `height` - Image dimensions (multiples of 64)
 - `steps` - Generation steps (20-50 typical)
 - `cfg_scale` - Prompt guidance (7-12 typical)
 - `seed` - Random seed (-1 for random)
 - `images` - Number of images to generate
 
-See [SwarmUI API docs](docs/SWARMUI_API.md) for complete parameter list.
+**First generation timing:**
+- Backend loads on-demand: ~10 seconds
+- Generation: ~30 seconds
+- **Total: ~40 seconds first time**
+
+**Subsequent generations:**
+- Backend already loaded
+- Generation: ~30 seconds
+
+**💡 See [SWARMUI_API.md](SWARMUI_API.md) for complete parameter list**
 
 ---
 
-### Step 7: Retrieve Generated Images
+### Step 6: Retrieve Generated Images
 
 Images are saved to SwarmUI's Output directory. You can retrieve them via:
 
@@ -318,15 +330,18 @@ with open("generated.png", "wb") as f:
 **Option 2: View URL**
 ```python
 # SwarmUI provides a View URL
-view_url = f"{public_url}/View/local/raw/{images[0].split('/')[-1]}"
+image_filename = images[0].split('/')[-1]
+view_url = f"{public_url}/View/local/raw/{image_filename}"
+print(f"View: {view_url}")
 ```
 
 ---
 
-### Step 8: Generate Multiple Images
+### Step 7: Generate Multiple Images
 
 You can make multiple generation calls using the same session.
 
+**Sequential generation:**
 ```python
 prompts = [
     "a serene ocean sunset",
@@ -366,7 +381,7 @@ response = requests.post(
         "width": 1024,
         "height": 1024,
         "steps": 30,
-        "images": 4  # Generate 4 images
+        "images": 4  # Generate 4 images in one request
     },
     timeout=1200  # Longer timeout for batch
 )
@@ -374,7 +389,7 @@ response = requests.post(
 
 ---
 
-### Step 9: Shutdown When Done
+### Step 8: Shutdown When Done
 
 Signal that you're done and the worker can shut down.
 
@@ -486,6 +501,8 @@ requests.post(
 print("✓ Shutdown complete")
 ```
 
+**💡 This example is simplified. See [CLIENT.md](CLIENT.md) for a production-ready client class!**
+
 ---
 
 ## Advanced Patterns
@@ -551,10 +568,10 @@ if queue.has_pending_jobs():
 **Problem:** Ready check times out
 
 **Solutions:**
-- First run takes 20-30 minutes (SwarmUI installation)
+- First run takes 60-90 seconds after initial setup
 - Check RunPod dashboard logs
-- Verify network volume has 15GB+ free space
-- Increase wait time for first run
+- Verify network volume has space
+- Check endpoint is active
 
 ### Can't access public URL
 **Problem:** URL returns connection refused
@@ -570,7 +587,7 @@ if queue.has_pending_jobs():
 
 **Solutions:**
 - Increase timeout (600s minimum for complex generations)
-- Verify model is loaded: call ListModels
+- Verify model is available: call ListModels
 - Check prompt/parameters are valid
 - Reduce steps/resolution for faster generation
 
@@ -581,6 +598,16 @@ if queue.has_pending_jobs():
 - Get a new session: `GetNewSession`
 - Sessions expire after ~1 hour of inactivity
 - One session per workflow is recommended
+- Don't create new session for every request
+
+### Slow first generation
+**Problem:** First generation takes long time
+
+**Explanation:**
+- Backend loads models on-demand
+- First generation: ~10s model load + 30s generation = 40s
+- Subsequent generations: ~30s (model already loaded)
+- This is normal and expected behavior
 
 ---
 
@@ -593,6 +620,7 @@ if queue.has_pending_jobs():
 - Monitor costs via RunPod dashboard
 - Use shutdown when completely done
 - Handle errors gracefully
+- List models before generating (optional but helpful)
 
 **❌ Don't:**
 - Block main thread with wakeup request
@@ -600,7 +628,27 @@ if queue.has_pending_jobs():
 - Use excessive keepalive duration
 - Forget to shutdown (costs add up)
 - Assume worker is ready immediately
-- Use hardcoded worker URLs (they change)
+- Use hardcoded worker URLs (they change per worker)
+
+---
+
+## Performance Metrics
+
+### Cold Start (After Initial Setup)
+- Worker startup: 60-90 seconds
+- Model listing: No additional time (disk read only)
+- First generation: +40 seconds (10s model load + 30s gen)
+- Subsequent generations: 30 seconds each
+
+### Warm Start (Within Idle Timeout)
+- Worker startup: <5 seconds
+- Everything else same as above
+
+### Cost Example (RTX 4090)
+- Cold start: ~$0.013
+- 10 generations (512x512, 20 steps): ~$0.05
+- 1 hour session: ~$0.89
+- **Total for 10 images: ~$0.06**
 
 ---
 
@@ -608,7 +656,8 @@ if queue.has_pending_jobs():
 
 - **[Client Usage Guide](CLIENT.md)** - Using the pre-built Python client
 - **[SwarmUI API Reference](SWARMUI_API.md)** - Complete API documentation
-- **[Back to README](../README.md)** - Project overview
+- **[Setup Guide](SETUP.md)** - First-time deployment walkthrough
+- **[Back to README](README.md)** - Project overview
 
 ---
 

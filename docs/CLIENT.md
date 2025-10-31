@@ -1,4 +1,4 @@
-﻿# Client Usage Guide
+# Client Usage Guide
 
 Complete guide to using the `SwarmUIClient` Python class for easy integration.
 
@@ -6,7 +6,7 @@ Complete guide to using the `SwarmUIClient` Python class for easy integration.
 
 ## Overview
 
-The `SwarmUIClient` class (in `examples/client.py`) provides a simple, reusable interface for managing SwarmUI workers and making direct API calls.
+The `SwarmUIClient` class (in `example_client.py`) provides a simple, reusable interface for managing SwarmUI workers and making direct API calls.
 
 **Features:**
 - ✅ Automatic worker wake-up and URL retrieval
@@ -14,6 +14,11 @@ The `SwarmUIClient` class (in `examples/client.py`) provides a simple, reusable 
 - ✅ Direct SwarmUI API access helpers
 - ✅ Clean session management
 - ✅ Error handling
+
+**📖 Related Documentation:**
+- **[Setup Guide](SETUP.md)** - First-time deployment
+- **[Workflow Guide](WORKFLOW.md)** - Complete workflow walkthrough
+- **[SwarmUI API Reference](SWARMUI_API.md)** - Complete API docs
 
 ---
 
@@ -30,7 +35,7 @@ cd runpod-worker-swarmui
 pip install -r requirements.txt
 
 # Use the client
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 ```
 
 **Dependencies:**
@@ -42,7 +47,7 @@ from examples.client import SwarmUIClient
 ## Quick Start
 
 ```python
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 
 # Initialize
 client = SwarmUIClient(
@@ -125,8 +130,8 @@ public_url = client.wakeup(duration=7200, wait=False)  # 2 hours
 4. Background thread continues keepalive for full duration
 
 **Timing:**
-- First run: 20-30 minutes (installs SwarmUI)
-- Subsequent runs: 60-90 seconds (launches existing install)
+- First run (after initial setup): 60-90 seconds
+- Subsequent runs: 60-90 seconds
 - `wait=True` adds polling time (~5-90s depending on state)
 
 ---
@@ -203,6 +208,8 @@ result = client.call_swarm(
 models = result.get("files", [])
 ```
 
+**💡 See [SWARMUI_API.md](SWARMUI_API.md) for all available endpoints**
+
 ---
 
 ### get_session()
@@ -250,6 +257,8 @@ print(f"Found {len(models)} models in {len(folders)} folders")
 for model in models:
     print(f"  - {model}")
 ```
+
+**Note:** Listing models reads from disk and does not load backends or use GPU.
 
 ---
 
@@ -312,6 +321,12 @@ for img in images:
     print(f"  - {img}")
 ```
 
+**Timing:**
+- First generation: ~40 seconds (10s model load + 30s generation)
+- Subsequent generations: ~30 seconds (model already loaded)
+
+**💡 See [SWARMUI_API.md](SWARMUI_API.md) for detailed parameter descriptions**
+
 ---
 
 ## Complete Usage Examples
@@ -319,7 +334,7 @@ for img in images:
 ### Example 1: Simple Generation
 
 ```python
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 
 # Initialize
 client = SwarmUIClient("your-endpoint", "your-key")
@@ -343,7 +358,7 @@ client.shutdown()
 ### Example 2: Batch Generation
 
 ```python
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 
 client = SwarmUIClient("your-endpoint", "your-key")
 
@@ -377,7 +392,7 @@ client.shutdown()
 ### Example 3: Interactive Session
 
 ```python
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 import time
 
 client = SwarmUIClient("your-endpoint", "your-key")
@@ -411,7 +426,7 @@ print("Session ended")
 ### Example 4: Custom Parameters
 
 ```python
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 
 client = SwarmUIClient("your-endpoint", "your-key")
 public_url = client.wakeup(duration=1200)  # 20 minutes
@@ -449,7 +464,7 @@ client.shutdown()
 ### Example 5: Error Handling
 
 ```python
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 import requests
 
 client = SwarmUIClient("your-endpoint", "your-key")
@@ -530,7 +545,7 @@ download_result = client.call_swarm(
 )
 ```
 
-See [SwarmUI API docs](SWARMUI_API.md) for complete API reference.
+**💡 See [SWARMUI_API.md](SWARMUI_API.md) for complete API reference**
 
 ---
 
@@ -599,7 +614,7 @@ for client, _, _ in workers:
 
 ### Import Error
 
-**Problem:** `ModuleNotFoundError: No module named 'examples'`
+**Problem:** `ModuleNotFoundError: No module named 'example_client'`
 
 **Solution:**
 ```python
@@ -607,12 +622,12 @@ for client, _, _ in workers:
 import sys
 sys.path.append('/path/to/runpod-worker-swarmui')
 
-from examples.client import SwarmUIClient
+from example_client import SwarmUIClient
 ```
 
-Or copy `client.py` to your project:
+Or copy `example_client.py` to your project:
 ```bash
-cp examples/client.py your_project/swarm_client.py
+cp example_client.py your_project/swarm_client.py
 ```
 
 ### Timeout on wakeup()
@@ -620,7 +635,7 @@ cp examples/client.py your_project/swarm_client.py
 **Problem:** `RuntimeError: Worker failed to start within timeout`
 
 **Solutions:**
-- First run takes 20-30 minutes (increase max_wait)
+- First run takes 60-90 seconds after initial setup
 - Check RunPod dashboard for errors
 - Verify network volume has space
 - Try `wait=False` and poll manually
@@ -665,7 +680,8 @@ Sessions expire after ~1 hour of inactivity.
 
 - **[Workflow Guide](WORKFLOW.md)** - Complete workflow walkthrough
 - **[SwarmUI API Reference](SWARMUI_API.md)** - Full API documentation
-- **[Back to README](../README.md)** - Project overview
+- **[Setup Guide](SETUP.md)** - First-time deployment
+- **[Back to README](README.md)** - Project overview
 
 ---
 

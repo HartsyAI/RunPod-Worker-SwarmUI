@@ -1,4 +1,4 @@
-﻿# SwarmUI API Reference
+# SwarmUI API Reference
 
 Complete reference for SwarmUI's API endpoints with examples for direct URL access.
 
@@ -8,12 +8,18 @@ Complete reference for SwarmUI's API endpoints with examples for direct URL acce
 
 SwarmUI provides a full-capability REST API for image generation and server management. Once you have the public worker URL, you can call any SwarmUI API endpoint directly.
 
-**Base URL Format:**
+**Base URL format:**
 ```
 https://{worker-id}-7801.proxy.runpod.net/API/{endpoint}
 ```
 
-**Official Documentation:**
+**📖 Related Documentation:**
+- **[Setup Guide](SETUP.md)** - First-time deployment
+- **[Workflow Guide](WORKFLOW.md)** - Complete workflow walkthrough  
+- **[Client Usage Guide](CLIENT.md)** - Python client examples
+- **[Back to README](README.md)** - Project overview
+
+**Official SwarmUI Documentation:**
 - [SwarmUI API Docs](https://github.com/mcmonkeyprojects/SwarmUI/blob/master/docs/API.md)
 - [API Routes Documentation](https://github.com/mcmonkeyprojects/SwarmUI/tree/master/docs/APIRoutes)
 
@@ -30,6 +36,8 @@ https://{worker-id}-7801.proxy.runpod.net/API/{endpoint}
 | `/API/ListModels` | POST | List available models |
 | `/API/DescribeModel` | POST | Get detailed model information |
 | `/API/DoModelDownloadWS` | WebSocket | Download models from URLs |
+
+**💡 See [WORKFLOW.md](WORKFLOW.md) for complete usage examples**
 
 ---
 
@@ -76,6 +84,8 @@ session_id = data["session_id"]
 - Create one session per workflow
 - Reuse session for multiple requests
 - If you get `invalid_session_id` error, get a new session
+
+**💡 See [CLIENT.md](CLIENT.md) for session management best practices**
 
 ---
 
@@ -171,6 +181,12 @@ images = result.get("images", [])
 - 7-9: Balanced (recommended)
 - 10-15: Very faithful to prompt, less creative
 
+**Timing:**
+- First generation: ~40 seconds (10s model load + 30s generation)
+- Subsequent generations: ~30 seconds (model already loaded)
+
+**💡 See [WORKFLOW.md](WORKFLOW.md) for complete generation examples**
+
 ---
 
 ### GenerateText2ImageWS
@@ -264,6 +280,10 @@ folders = data.get("folders", [])
 }
 ```
 
+**Note:** Listing models reads from disk and does NOT load backends or use GPU. This is a fast, inexpensive operation.
+
+**💡 See [CLIENT.md](CLIENT.md) for model listing examples**
+
 ---
 
 ### DescribeModel
@@ -344,6 +364,8 @@ while True:
         print(f"Error: {msg['error']}")
         break
 ```
+
+**💡 See [SETUP.md](SETUP.md) for model upload methods**
 
 ---
 
@@ -454,7 +476,7 @@ response = requests.post(
 }
 ```
 
-**Solution:** Wait for backends to load (check with handler's `ready` action)
+**Solution:** Wait for backends to load (happens on first generation)
 
 ---
 
@@ -552,6 +574,8 @@ except Exception as e:
 - Use appropriate step counts
 - Monitor generation times
 
+**💡 See [CLIENT.md](CLIENT.md) for performance optimization examples**
+
 ---
 
 ## Best Practices
@@ -572,11 +596,37 @@ except Exception as e:
 
 ---
 
+## Timing Reference
+
+### Model Listing
+- Time: <1 second
+- Cost: ~$0.0001 (negligible)
+- GPU: Not used (disk read only)
+
+### First Generation (Backend Load)
+- Model load: ~10 seconds
+- Generation: ~30 seconds
+- Total: ~40 seconds
+- Cost: ~$0.01 (RTX 4090)
+
+### Subsequent Generations
+- Time: ~30 seconds
+- Cost: ~$0.008 (RTX 4090)
+
+### Session Creation
+- Time: <1 second
+- Cost: Negligible
+
+**💡 See [WORKFLOW.md](WORKFLOW.md) for complete timing breakdown**
+
+---
+
 ## Next Steps
 
 - **[Workflow Guide](WORKFLOW.md)** - Complete workflow walkthrough
 - **[Client Usage Guide](CLIENT.md)** - Using the Python client
-- **[Back to README](../README.md)** - Project overview
+- **[Setup Guide](SETUP.md)** - First-time deployment
+- **[Back to README](README.md)** - Project overview
 
 ---
 
