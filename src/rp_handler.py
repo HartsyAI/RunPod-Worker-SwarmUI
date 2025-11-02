@@ -10,8 +10,13 @@ Workflow:
 Session Management:
 - Session created ONCE at startup and cached globally
 - All actions return the same cached session
-- Keepalive uses ListBackends (lightweight, no session creation)
+- Keepalive uses simple HTTP GET (no session needed)
 - If session expires, we recreate it automatically
+
+LiteDB Issues:
+- If you see "Detected loop in FindAll" errors, SwarmUI's session database may be corrupted
+- The handler includes retry logic to handle transient errors
+- If persistent, delete SwarmUI's Data/Sessions.ldb file and restart
 """
 
 import os
@@ -124,7 +129,7 @@ def get_or_create_session() -> tuple[str, str]:
         Tuple of (session_id, version)
         
     Raises:
-        RuntimeError: If session creation fails
+        RuntimeError: If session creation fails after retries
     """
     global CACHED_SESSION_ID, CACHED_VERSION
     
@@ -132,29 +137,44 @@ def get_or_create_session() -> tuple[str, str]:
         return CACHED_SESSION_ID, CACHED_VERSION
     
     Log.info("Creating new SwarmUI session...")
-    session_info = swarm_request('POST', '/API/GetNewSession', timeout=10)
-    CACHED_SESSION_ID = session_info.get('session_id')
-    CACHED_VERSION = session_info.get('version', 'unknown')
     
-    if not CACHED_SESSION_ID:
-        raise RuntimeError("Failed to get session ID from SwarmUI")
-    
-    Log.success(f"Session created: {CACHED_SESSION_ID[:16]}...")
-    Log.info(f"Version: {CACHED_VERSION}")
-    
-    return CACHED_SESSION_ID, CACHED_VERSION
+    # Retry session creation in case of transient errors (like LiteDB loops)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            session_info = swarm_request('POST', '/API/GetNewSession', timeout=10)
+            CACHED_SESSION_ID = session_info.get('session_id')
+            CACHED_VERSION = session_info.get('version', 'unknown')
+            
+            if not CACHED_SESSION_ID:
+                raise RuntimeError("Failed to get session ID from SwarmUI")
+            
+            Log.success(f"Session created: {CACHED_SESSION_ID[:16]}...")
+            Log.info(f"Version: {CACHED_VERSION}")
+            
+            return CACHED_SESSION_ID, CACHED_VERSION
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                Log.warning(f"Session creation attempt {attempt + 1} failed: {e}, retrying...")
+                time.sleep(2)  # Wait before retry
+            else:
+                Log.error(f"Session creation failed after {max_retries} attempts: {e}")
+                raise RuntimeError(f"Failed to create session: {e}")
 
 
 def keepalive_ping() -> bool:
-    """Lightweight keepalive ping using ListBackends endpoint.
+    """Lightweight keepalive ping using simple HTTP GET.
     
     Returns:
         True if successful, False otherwise
     """
     try:
-        # Use ListBackends - lightweight endpoint that doesn't create sessions
-        swarm_request('POST', '/API/ListBackends', payload={}, timeout=10)
-        return True
+        # Simple HTTP GET to root - checks if SwarmUI server is alive
+        # No session needed, no database access, no API calls
+        url = f"{SWARMUI_API_URL.rstrip('/')}"
+        response = session.get(url, timeout=5, allow_redirects=False)
+        return response.status_code in [200, 301, 302, 303, 307, 308]
     except Exception as e:
         Log.warning(f"Keepalive ping failed: {e}")
         return False
@@ -296,7 +316,7 @@ def action_ready(job_input: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def action_health(job_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Quick health check using lightweight endpoint.
+    """Quick health check using simple HTTP GET.
     
     Args:
         job_input: Unused
@@ -305,10 +325,13 @@ def action_health(job_input: Dict[str, Any]) -> Dict[str, Any]:
         Dict with health status
     """
     try:
-        # Use lightweight endpoint for health check
-        swarm_request('POST', '/API/ListBackends', payload={}, timeout=5)
+        # Simple HTTP GET to root - fastest health check, no session needed
+        url = f"{SWARMUI_API_URL.rstrip('/')}"
+        response = session.get(url, timeout=5, allow_redirects=False)
+        healthy = response.status_code in [200, 301, 302, 303, 307, 308]
+        
         return {
-            'healthy': True,
+            'healthy': healthy,
             'public_url': get_public_url(),
             'worker_id': RUNPOD_POD_ID
         }
