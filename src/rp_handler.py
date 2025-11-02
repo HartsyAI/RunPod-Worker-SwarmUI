@@ -2,10 +2,16 @@
 
 Workflow:
 1. Send wakeup/keepalive request to start worker
-2. Handler returns public SwarmUI URL
+2. Handler returns public SwarmUI URL and cached session
 3. Make direct SwarmUI API calls to that URL
-4. Handler keeps worker alive by pinging SwarmUI
+4. Handler keeps worker alive by pinging lightweight endpoints
 5. Send shutdown when done
+
+Session Management:
+- Session created ONCE at startup and cached globally
+- All actions return the same cached session
+- Keepalive uses ListBackends (lightweight, no session creation)
+- If session expires, we recreate it automatically
 """
 
 import os
@@ -22,6 +28,11 @@ SWARMUI_PORT = os.getenv('SWARMUI_PORT', '7801')
 STARTUP_TIMEOUT = int(os.getenv('STARTUP_TIMEOUT', '1800'))
 CHECK_INTERVAL = 10
 RUNPOD_POD_ID = os.getenv('RUNPOD_POD_ID', 'unknown')
+
+# Global session cache - created once at startup, reused for all requests
+CACHED_SESSION_ID: Optional[str] = None
+CACHED_VERSION: Optional[str] = None
+
 session = requests.Session()
 adapter = requests.adapters.HTTPAdapter(
     max_retries=requests.adapters.Retry(
@@ -106,22 +117,51 @@ def swarm_request(method: str, path: str, payload: Optional[Dict[str, Any]] = No
         raise RuntimeError(f"SwarmUI request failed: {e}")
 
 
-def get_session_id() -> Optional[str]:
-    """Get a new SwarmUI session ID.
+def get_or_create_session() -> tuple[str, str]:
+    """Get cached session or create new one if needed.
     
     Returns:
-        Session ID or None if failed
+        Tuple of (session_id, version)
+        
+    Raises:
+        RuntimeError: If session creation fails
+    """
+    global CACHED_SESSION_ID, CACHED_VERSION
+    
+    if CACHED_SESSION_ID:
+        return CACHED_SESSION_ID, CACHED_VERSION
+    
+    Log.info("Creating new SwarmUI session...")
+    session_info = swarm_request('POST', '/API/GetNewSession', timeout=10)
+    CACHED_SESSION_ID = session_info.get('session_id')
+    CACHED_VERSION = session_info.get('version', 'unknown')
+    
+    if not CACHED_SESSION_ID:
+        raise RuntimeError("Failed to get session ID from SwarmUI")
+    
+    Log.success(f"Session created: {CACHED_SESSION_ID[:16]}...")
+    Log.info(f"Version: {CACHED_VERSION}")
+    
+    return CACHED_SESSION_ID, CACHED_VERSION
+
+
+def keepalive_ping() -> bool:
+    """Lightweight keepalive ping using ListBackends endpoint.
+    
+    Returns:
+        True if successful, False otherwise
     """
     try:
-        data = swarm_request('POST', '/API/GetNewSession', timeout=10)
-        return data.get('session_id')
+        # Use ListBackends - lightweight endpoint that doesn't create sessions
+        swarm_request('POST', '/API/ListBackends', payload={}, timeout=10)
+        return True
     except Exception as e:
-        Log.error(f"Failed to get session: {e}")
-        return None
+        Log.warning(f"Keepalive ping failed: {e}")
+        return False
 
 
 def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
-    """Wait for SwarmUI to become ready.
+    """Wait for SwarmUI to become ready and create initial session.
     
     Args:
         max_wait_seconds: Maximum wait time
@@ -129,21 +169,31 @@ def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
     Returns:
         True if ready, False if timeout
     """
+    global CACHED_SESSION_ID, CACHED_VERSION
+    
     Log.header("Waiting for SwarmUI to be ready")
     Log.info(f"URL: {SWARMUI_API_URL}")
     Log.info(f"Public URL: {get_public_url()}")
     Log.info(f"Max wait: {max_wait_seconds}s")
+    
     start_time = time.time()
     max_attempts = max(1, max_wait_seconds // CHECK_INTERVAL)
+    
     for attempt in range(max_attempts):
         elapsed = int(time.time() - start_time)
         try:
+            # Try to create session - this verifies SwarmUI is ready
             session_info = swarm_request('POST', '/API/GetNewSession', timeout=10)
             session_id = session_info.get('session_id')
+            
             if session_id:
+                # Cache the session globally
+                CACHED_SESSION_ID = session_id
+                CACHED_VERSION = session_info.get('version', 'unknown')
+                
                 Log.success(f"SwarmUI API ready after {elapsed}s")
-                version = session_info.get('version', 'unknown')
-                Log.info(f"Version: {version}")
+                Log.info(f"Version: {CACHED_VERSION}")
+                Log.info(f"Session: {CACHED_SESSION_ID[:16]}...")
                 Log.info("Note: Backend models will load on-demand when first generation is requested")
                 return True
             else:
@@ -154,6 +204,7 @@ def wait_for_swarmui_ready(max_wait_seconds: int = STARTUP_TIMEOUT) -> bool:
         if elapsed >= max_wait_seconds:
             break
         time.sleep(CHECK_INTERVAL)
+    
     Log.error(f"SwarmUI not ready after {max_wait_seconds}s")
     return False
 
@@ -165,18 +216,11 @@ def action_wakeup(job_input: Dict[str, Any]) -> Dict[str, Any]:
         job_input: Optional duration for keepalive (seconds)
         
     Returns:
-        Dict with public URL and session info
+        Dict with public URL and cached session info
     """
     try:
-        # Get session to verify SwarmUI is ready
-        session_info = swarm_request('POST', '/API/GetNewSession', timeout=10)
-        session_id = session_info.get('session_id')
-        
-        if not session_id:
-            return {
-                'success': False,
-                'error': 'SwarmUI not ready'
-            }
+        # Get or use cached session
+        session_id, version = get_or_create_session()
         
         # Get keepalive duration
         duration = int(job_input.get('duration', 3600))  # Default 1 hour
@@ -187,18 +231,16 @@ def action_wakeup(job_input: Dict[str, Any]) -> Dict[str, Any]:
         Log.info(f"Worker ready - Public URL: {public_url}")
         Log.info(f"Starting keepalive for {duration}s (interval: {interval}s)")
         
-        # Start keepalive loop (blocks for duration)
+        # Start keepalive loop using lightweight pings
         pings = 0
         failures = 0
         end_time = time.time() + duration
         
         while time.time() < end_time:
-            try:
-                swarm_request('POST', '/API/GetNewSession', timeout=10)
+            if keepalive_ping():
                 pings += 1
-            except Exception as e:
+            else:
                 failures += 1
-                Log.warning(f"Keepalive ping failed: {e}")
             
             time.sleep(interval)
         
@@ -208,7 +250,7 @@ def action_wakeup(job_input: Dict[str, Any]) -> Dict[str, Any]:
             'success': True,
             'public_url': public_url,
             'session_id': session_id,
-            'version': session_info.get('version', 'unknown'),
+            'version': version,
             'worker_id': RUNPOD_POD_ID,
             'keepalive': {
                 'duration': duration,
@@ -232,23 +274,17 @@ def action_ready(job_input: Dict[str, Any]) -> Dict[str, Any]:
         job_input: Unused
         
     Returns:
-        Dict with ready status and connection info
+        Dict with ready status and cached session info
     """
     try:
-        session_info = swarm_request('POST', '/API/GetNewSession', timeout=10)
-        session_id = session_info.get('session_id')
-        
-        if not session_id:
-            return {
-                'ready': False,
-                'error': 'No session available'
-            }
+        # Use cached session if available, create if needed
+        session_id, version = get_or_create_session()
         
         return {
             'ready': True,
             'public_url': get_public_url(),
             'session_id': session_id,
-            'version': session_info.get('version', 'unknown'),
+            'version': version,
             'worker_id': RUNPOD_POD_ID
         }
         
@@ -260,7 +296,7 @@ def action_ready(job_input: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def action_health(job_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Quick health check.
+    """Quick health check using lightweight endpoint.
     
     Args:
         job_input: Unused
@@ -269,7 +305,8 @@ def action_health(job_input: Dict[str, Any]) -> Dict[str, Any]:
         Dict with health status
     """
     try:
-        swarm_request('POST', '/API/GetNewSession', timeout=5)
+        # Use lightweight endpoint for health check
+        swarm_request('POST', '/API/ListBackends', payload={}, timeout=5)
         return {
             'healthy': True,
             'public_url': get_public_url(),
@@ -283,7 +320,7 @@ def action_health(job_input: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def action_keepalive(job_input: Dict[str, Any]) -> Dict[str, Any]:
-    """Keep worker warm by pinging SwarmUI.
+    """Keep worker warm by pinging lightweight endpoints.
     
     Args:
         job_input: duration (seconds), interval (seconds)
@@ -309,10 +346,9 @@ def action_keepalive(job_input: Dict[str, Any]) -> Dict[str, Any]:
     end_time = time.time() + duration
     
     while time.time() < end_time:
-        try:
-            swarm_request('POST', '/API/GetNewSession', timeout=10)
+        if keepalive_ping():
             pings += 1
-        except Exception:
+        else:
             failures += 1
         
         time.sleep(interval)
@@ -399,5 +435,6 @@ if __name__ == "__main__":
     Log.header("System Ready - Starting RunPod Handler")
     Log.info(f"Public URL: {get_public_url()}")
     Log.info(f"Worker ID: {RUNPOD_POD_ID}")
+    Log.info(f"Cached Session: {CACHED_SESSION_ID[:16]}...")
     
     runpod.serverless.start({"handler": handler})
