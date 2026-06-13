@@ -1,7 +1,8 @@
 # SwarmUI RunPod Serverless - Minimal Dockerfile
 # Uses SwarmUI's official install and launch scripts
 
-FROM nvidia/cuda:12.1.0-cudnn8-devel-ubuntu22.04
+# Ubuntu 24.04 base: the sd.cpp prebuilt binaries require glibc 2.38 / GLIBCXX_3.4.32, which 22.04 cannot provide.
+FROM nvidia/cuda:12.6.2-cudnn-devel-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -15,7 +16,11 @@ WORKDIR /
 # ============================================================================== 
 # Install System Dependencies
 # ============================================================================== 
+# deadsnakes PPA provides python3.11 on 24.04 (which defaults to python3.12).
 RUN apt-get update && \
+    apt-get install -y --no-install-recommends software-properties-common gnupg && \
+    add-apt-repository -y ppa:deadsnakes/ppa && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         # Core utilities
         wget \
@@ -34,13 +39,11 @@ RUN apt-get update && \
         libglib2.0-0 \
         libgl1 \
         libgomp1 \
+        # Vulkan loader (required by the sd.cpp Vulkan backend binary)
+        libvulkan1 \
+        # .NET 8 SDK (required by SwarmUI); native 24.04 package avoids the Microsoft-feed conflict on noble
+        dotnet-sdk-8.0 \
     && \
-    # Install .NET 8 SDK (required by SwarmUI)
-    wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb && \
-    dpkg -i packages-microsoft-prod.deb && \
-    rm packages-microsoft-prod.deb && \
-    apt-get update && \
-    apt-get install -y dotnet-sdk-8.0 && \
     # Cleanup
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
