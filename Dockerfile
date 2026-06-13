@@ -56,8 +56,10 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 # Install Handler Dependencies
 # ============================================================================== 
 COPY requirements.txt /requirements.txt
-RUN python3 -m pip install --no-cache-dir --upgrade pip && \
-    python3 -m pip install --no-cache-dir -r /requirements.txt && \
+# 24.04: --ignore-installed avoids uninstalling the Debian-managed pip (no RECORD file);
+# --break-system-packages opts out of PEP 668 for this system-wide install.
+RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-installed --upgrade pip && \
+    python3 -m pip install --no-cache-dir --break-system-packages -r /requirements.txt && \
     rm /requirements.txt
 
 # ============================================================================== 
