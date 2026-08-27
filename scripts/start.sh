@@ -99,6 +99,28 @@ fi
 
 chmod +x launch-linux.sh
 
+# Optional private data directory.
+#
+# SwarmUI keeps its users, model metadata, settings and backend config in Data/, and
+# the user and metadata stores are LiteDB files. LiteDB expects a single process, so
+# two SwarmUI instances sharing one Data/ over a network volume can corrupt it.
+#
+# Leave SWARM_DATA_DIR unset to use the shared Data/ (fine when only one instance runs
+# at a time, and it keeps your configured backends). Set it when a pod and serverless
+# workers may run together, or when serverless scales past one worker. It is seeded
+# from the shared Data/ on first use so the instance still starts with your backends
+# and settings rather than an empty SwarmUI with no backend at all.
+EXTRA_ARGS=""
+if [ -n "$SWARM_DATA_DIR" ]; then
+    echo "Using private data directory: $SWARM_DATA_DIR"
+    mkdir -p "$SWARM_DATA_DIR"
+    if [ ! -f "$SWARM_DATA_DIR/Settings.fds" ] && [ -d "$SWARMUI_PATH/Data" ]; then
+        echo "Seeding it from the shared Data directory..."
+        cp -a "$SWARMUI_PATH/Data/." "$SWARM_DATA_DIR/"
+    fi
+    EXTRA_ARGS="--data_dir $SWARM_DATA_DIR"
+fi
+
 echo "Server: $SWARMUI_HOST:$SWARMUI_PORT"
 echo "Using SwarmUI's launch-linux.sh script"
 echo "=============================================================================="
@@ -111,4 +133,5 @@ echo ""
 exec ./launch-linux.sh \
     --launch_mode none \
     --host "$SWARMUI_HOST" \
-    --port "$SWARMUI_PORT" 2>&1
+    --port "$SWARMUI_PORT" \
+    $EXTRA_ARGS 2>&1

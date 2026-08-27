@@ -67,10 +67,11 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-insta
 # ============================================================================== 
 COPY src/rp_handler.py /rp_handler.py
 COPY scripts/start.sh /start.sh
+COPY scripts/entrypoint.sh /entrypoint.sh
 
 # Fix line endings and permissions
-RUN dos2unix /start.sh /rp_handler.py 2>/dev/null || true && \
-    chmod +x /start.sh
+RUN dos2unix /start.sh /entrypoint.sh /rp_handler.py 2>/dev/null || true && \
+    chmod +x /start.sh /entrypoint.sh
 
 # ============================================================================== 
 # Expose SwarmUI Port
@@ -85,7 +86,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=3 \
         -H "Content-Type: application/json" \
         -d '{}' || exit 1
 
-# ============================================================================== 
-# Start SwarmUI and RunPod Handler
-# ============================================================================== 
-CMD ["/bin/bash", "-c", "/start.sh & python3 -u /rp_handler.py"]
+# ==============================================================================
+# Start SwarmUI, and the RunPod job handler only when running as a serverless worker
+# ==============================================================================
+# The entrypoint picks the mode, so this one image works as both a serverless worker
+# and a plain GPU pod against the same SwarmUI install on the same network volume.
+CMD ["/entrypoint.sh"]
