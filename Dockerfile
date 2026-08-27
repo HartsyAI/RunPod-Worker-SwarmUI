@@ -64,10 +64,10 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 # packages .NET 8 natively and adding the Microsoft feed on noble conflicts with it.
 ENV DOTNET_ROOT=/usr/share/dotnet
 ENV PATH="${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}"
+# The SDK install already brings Microsoft.AspNetCore.App, so it is not fetched separately.
 RUN wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh && \
     chmod +x /tmp/dotnet-install.sh && \
     /tmp/dotnet-install.sh --channel 10.0 --install-dir "$DOTNET_ROOT" && \
-    /tmp/dotnet-install.sh --channel 10.0 --runtime aspnetcore --install-dir "$DOTNET_ROOT" && \
     rm /tmp/dotnet-install.sh && \
     ln -sf "$DOTNET_ROOT/dotnet" /usr/bin/dotnet && \
     dotnet --list-sdks

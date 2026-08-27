@@ -15,6 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
+      # This image is ~15GB (CUDA devel base plus the .NET SDK), and a GitHub-hosted runner starts
+      # with only about 14GB free, so the build runs out of disk before it can export. Removing
+      # preinstalled toolchains the build never touches reclaims well over 20GB.
+      - name: Free up runner disk space
+        run: |
+          echo "Before:"; df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /usr/local/share/powershell \
+                      /usr/share/swift /opt/hostedtoolcache
+          sudo docker image prune --all --force || true
+          echo "After:"; df -h /
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -48,4 +60,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # mode=min, not max: GitHub's cache is capped at 10GB per repo and this image is larger
+          # than that, so caching every intermediate layer just thrashes the cache and evicts itself.
+          cache-to: type=gha,mode=min
