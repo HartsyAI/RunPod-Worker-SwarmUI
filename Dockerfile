@@ -41,8 +41,6 @@ RUN apt-get update && \
         libgomp1 \
         # Vulkan loader (required by the sd.cpp Vulkan backend binary)
         libvulkan1 \
-        # .NET 8 SDK (required by SwarmUI); native 24.04 package avoids the Microsoft-feed conflict on noble
-        dotnet-sdk-8.0 \
     && \
     # Cleanup
     apt-get clean && \
@@ -51,6 +49,28 @@ RUN apt-get update && \
 # Set Python 3.11 as default
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
     update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+# ==============================================================================
+# Install .NET 10 SDK
+# ==============================================================================
+# SwarmUI's own launcher treats .NET 8 as legacy and installs .NET 10, so shipping
+# 10 here keeps the image aligned with it. Without this, that launcher would pause
+# 15 seconds and download a second .NET into the network volume on a cold start.
+#
+# SwarmUI targets net8.0 but builds with <RollForward>Major</RollForward>, so it
+# runs on the .NET 10 runtime; a separate .NET 8 runtime is not needed.
+#
+# Installed with Microsoft's official script rather than apt, because Ubuntu 24.04
+# packages .NET 8 natively and adding the Microsoft feed on noble conflicts with it.
+ENV DOTNET_ROOT=/usr/share/dotnet
+ENV PATH="${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}"
+RUN wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh && \
+    chmod +x /tmp/dotnet-install.sh && \
+    /tmp/dotnet-install.sh --channel 10.0 --install-dir "$DOTNET_ROOT" && \
+    /tmp/dotnet-install.sh --channel 10.0 --runtime aspnetcore --install-dir "$DOTNET_ROOT" && \
+    rm /tmp/dotnet-install.sh && \
+    ln -sf "$DOTNET_ROOT/dotnet" /usr/bin/dotnet && \
+    dotnet --list-sdks
 
 # ============================================================================== 
 # Install Handler Dependencies
