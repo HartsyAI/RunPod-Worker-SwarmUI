@@ -30,17 +30,27 @@ for any container launched by a workergroup, no template configuration needed be
 WORKER_PORT and exposing it (`-p {WORKER_PORT}:{WORKER_PORT}` in Docker options).
 """
 
+import asyncio
 import logging
 import os
+import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
+import aiohttp
 from aiohttp import ClientResponse, web
 
 from vastai.serverless.server.lib.data_types import ApiPayload, EndpointHandler
 from vastai.serverless.server.worker import HandlerConfig, Worker, WorkerConfig
 
 log = logging.getLogger("vast_worker")
+
+# SwarmUI is cloned/copied and launched by start.sh in the background while this worker starts, so
+# it is normally not listening yet when the first probe runs. Generous, since a cold worker also
+# competes with the image pull for disk on some hosts.
+SWARMUI_BOOT_TIMEOUT = float(os.environ.get("SWARMUI_BOOT_TIMEOUT", "900"))
+SWARMUI_BOOT_POLL_INTERVAL = 2.0
 
 SWARMUI_PORT = os.environ.get("SWARMUI_PORT", "7801")
 PUBLIC_IPADDR = os.environ.get("PUBLIC_IPADDR", "localhost")
@@ -52,6 +62,47 @@ VAST_TCP_PORT_SWARMUI = os.environ.get(f"VAST_TCP_PORT_{SWARMUI_PORT}", SWARMUI_
 
 def get_public_url() -> str:
     return f"http://{PUBLIC_IPADDR}:{VAST_TCP_PORT_SWARMUI}"
+
+
+@asynccontextmanager
+async def swarmui_lifecycle():
+    """Blocks until SwarmUI actually answers, which is what makes this worker report ready.
+
+    The SDK only ever calls `metrics._model_loaded()` - the flag the autoscaler reads to move a
+    worker out of "loading" - from one of two places (vastai 1.6.0, lib/backend.py): the log-tailing
+    path, which needs both `model_log_file` and a `LogAction.ModelLoaded` pattern to match a line,
+    or this lifecycle path. A worker that configures none of them can never report ready, so the
+    autoscaler eventually recycles it and tries another host, forever, no matter how healthy the
+    container actually is.
+
+    The lifecycle is used here rather than log tailing because readiness for this worker is exactly
+    "SwarmUI answers GetNewSession" - the same call the handler makes - so probing it directly is
+    both the true condition and immune to SwarmUI changing its startup log wording.
+    """
+    url = f"http://127.0.0.1:{SWARMUI_PORT}/API/GetNewSession"
+    deadline = time.monotonic() + SWARMUI_BOOT_TIMEOUT
+    attempt = 0
+    log.info(f"Waiting for SwarmUI to come up at {url} (timeout {SWARMUI_BOOT_TIMEOUT:.0f}s)...")
+    async with aiohttp.ClientSession() as session:
+        while True:
+            attempt += 1
+            try:
+                async with session.post(
+                    url, json={}, timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200 and (await response.json()).get("session_id"):
+                        log.info(f"SwarmUI is up after {attempt} probe(s); reporting worker ready.")
+                        break
+                    log.debug(f"SwarmUI not ready yet (HTTP {response.status})")
+            except Exception as exc:
+                log.debug(f"SwarmUI not reachable yet: {exc}")
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"SwarmUI did not answer {url} within {SWARMUI_BOOT_TIMEOUT:.0f}s "
+                    f"({attempt} probes) - refusing to report this worker ready."
+                )
+            await asyncio.sleep(SWARMUI_BOOT_POLL_INTERVAL)
+    yield
 
 
 @dataclass
@@ -135,5 +186,8 @@ if __name__ == "__main__":
         model_server_url="http://127.0.0.1",
         model_server_port=int(SWARMUI_PORT),
         handlers=[HandlerConfig(route="/handler", handler_class=WakeupHandler)],
+        # Without this the worker never reports ready and the autoscaler recycles it - see
+        # swarmui_lifecycle's docstring. This is not optional.
+        lifecycle=swarmui_lifecycle(),
     )
     Worker(config).run()
