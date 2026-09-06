@@ -79,15 +79,25 @@ RUN wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh && \
 # Install Handler Dependencies
 # ============================================================================== 
 COPY requirements.txt /requirements.txt
-# 24.04: --ignore-installed avoids uninstalling the Debian-managed pip (no RECORD file);
-# --break-system-packages opts out of PEP 668 for this system-wide install.
-RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-installed --upgrade pip && \
-    python3 -m pip install --no-cache-dir --break-system-packages -r /requirements.txt && \
+# One venv for every Python dependency this image needs (rp_handler.py's and vast_worker.py's
+# alike), not --break-system-packages against the system Python. That flag plus
+# --ignore-installed used to be enough on this base image, but some apt package pulled in a
+# newer Debian-managed `cryptography` at some point after this Dockerfile was last verified,
+# and any pip install that now needs a different cryptography version (runpod's own dependency
+# chain does, and vastai pins one exactly) fails outright: pip can't uninstall a package apt
+# installed, since apt doesn't leave the RECORD file pip needs to safely replace it. A venv
+# sidesteps the system Python entirely rather than fighting PEP 668 and apt over the same
+# package - confirmed broken system-wide in CI even for requirements.txt alone, unrelated to
+# vastai specifically.
+RUN python3 -m venv /opt/venv && \
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir -r /requirements.txt && \
+    /opt/venv/bin/pip install --no-cache-dir "vastai>=1.6.0" && \
     rm /requirements.txt
 
-# ============================================================================== 
+# ==============================================================================
 # Copy Application Files
-# ============================================================================== 
+# ==============================================================================
 COPY src/rp_handler.py /rp_handler.py
 COPY src/vast_worker.py /vast_worker.py
 COPY scripts/start.sh /start.sh
