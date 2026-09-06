@@ -42,16 +42,14 @@ echo "==========================================================================
 case "$MODE" in
     serverless)
         /start.sh &
-        exec python3 -u /rp_handler.py
+        exec /opt/venv/bin/python -u /rp_handler.py
         ;;
     pod)
         exec /start.sh
         ;;
     vast_serverless)
         /start.sh &
-        # Its own venv - see the Dockerfile's "Install Vast.ai Serverless Dependencies" step -
-        # since vastai's pinned cryptography version conflicts with the system Python's.
-        exec /opt/vastai-venv/bin/python -u /vast_worker.py
+        exec /opt/venv/bin/python -u /vast_worker.py
         ;;
     *)
         echo "ERROR: SWARM_MODE must be 'serverless', 'pod', 'vast_serverless', or 'auto' (got '$MODE')."
