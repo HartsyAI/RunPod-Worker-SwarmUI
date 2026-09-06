@@ -41,9 +41,14 @@ if [ ! -d "$SWARMUI_PATH" ]; then
     wget -q https://github.com/mcmonkeyprojects/SwarmUI/releases/download/0.6.5-Beta/install-linux.sh -O install-linux.sh
     chmod +x install-linux.sh
     
-    # Run SwarmUI installer
+    # Run SwarmUI installer. install-linux.sh forwards its own arguments straight through to the
+    # launch-linux.sh it runs at the end (`./launch-linux.sh $@`), so passing our real host/port/
+    # launch_mode here is what actually launches correctly on a cold volume - without this, the
+    # installer's own first launch uses SwarmUI's bare defaults (host=localhost, launch_mode=install,
+    # which tries and harmlessly fails to open a system browser), binds to localhost only, and never
+    # returns control to the launch below since that first launch runs in the foreground forever.
     echo "Running SwarmUI installer (this will clone and setup SwarmUI)..."
-    ./install-linux.sh
+    ./install-linux.sh --launch_mode none --host "$SWARMUI_HOST" --port "$SWARMUI_PORT"
     
     if [ ! -d "$SWARMUI_PATH" ]; then
         echo "ERROR: SwarmUI installation failed - directory not created"
