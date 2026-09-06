@@ -75,9 +75,27 @@ RUN wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh && \
     ln -sf "$DOTNET_ROOT/dotnet" /usr/bin/dotnet && \
     dotnet --list-sdks
 
-# ============================================================================== 
+# ==============================================================================
+# Bake a pre-built SwarmUI into the image
+# ==============================================================================
+# start.sh copies this to $SWARMUI_PATH on a fresh volume/container instead of git-cloning and
+# dotnet-building at container startup - a local file copy takes seconds; a live clone+build
+# takes minutes. That gap matters most for Vast.ai Serverless: its workergroups cannot attach a
+# volume at all (no such option exists anywhere in Vast's own console for a workergroup, unlike
+# RunPod's persistent network volume), so every cold worker used to pay the full clone+build
+# cost, and Vast's autoscaler routinely swaps out a not-yet-ready worker for a cheaper candidate
+# before that finishes - a serverless endpoint could churn indefinitely without ever reaching
+# "ready". This mirrors exactly what SwarmUI's own launch-linux.sh does on first run
+# (launchtools/linux-build-logic.sh: `dotnet build src/SwarmUI.csproj --configuration Release
+# -o ./src/bin/live_release`), just done once here instead of on every fresh container.
+RUN git clone --depth 1 https://github.com/mcmonkeyprojects/SwarmUI /opt/SwarmUI-baked && \
+    cd /opt/SwarmUI-baked && \
+    dotnet build src/SwarmUI.csproj --configuration Release -o ./src/bin/live_release && \
+    git rev-parse HEAD > src/bin/last_build
+
+# ==============================================================================
 # Install Handler Dependencies
-# ============================================================================== 
+# ==============================================================================
 COPY requirements.txt /requirements.txt
 # One venv for every Python dependency this image needs (rp_handler.py's and vast_worker.py's
 # alike), not --break-system-packages against the system Python. That flag plus
