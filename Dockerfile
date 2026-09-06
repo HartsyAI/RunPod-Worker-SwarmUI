@@ -8,6 +8,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV VOLUME_PATH=/runpod-volume
+# Port the Vast.ai PyWorker listens on in vast_serverless mode. Unused by the other two modes,
+# but exposed unconditionally since one image serves all three - see scripts/entrypoint.sh.
+ENV WORKER_PORT=8000
 ENV SWARMUI_PORT=7801
 ENV SWARMUI_HOST=0.0.0.0
 
@@ -86,17 +89,20 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-insta
 # Copy Application Files
 # ============================================================================== 
 COPY src/rp_handler.py /rp_handler.py
+COPY src/vast_worker.py /vast_worker.py
 COPY scripts/start.sh /start.sh
 COPY scripts/entrypoint.sh /entrypoint.sh
 
 # Fix line endings and permissions
-RUN dos2unix /start.sh /entrypoint.sh /rp_handler.py 2>/dev/null || true && \
+RUN dos2unix /start.sh /entrypoint.sh /rp_handler.py /vast_worker.py 2>/dev/null || true && \
     chmod +x /start.sh /entrypoint.sh
 
-# ============================================================================== 
-# Expose SwarmUI Port
-# ============================================================================== 
+# ==============================================================================
+# Expose Ports
+# ==============================================================================
+# SwarmUI itself, plus the Vast.ai PyWorker's port (only listened on in vast_serverless mode).
 EXPOSE ${SWARMUI_PORT}
+EXPOSE ${WORKER_PORT}
 
 # ============================================================================== 
 # Health Check
@@ -107,8 +113,9 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=3 \
         -d '{}' || exit 1
 
 # ==============================================================================
-# Start SwarmUI, and the RunPod job handler only when running as a serverless worker
+# Start SwarmUI, plus a job handler when running as any kind of serverless worker
 # ==============================================================================
-# The entrypoint picks the mode, so this one image works as both a serverless worker
-# and a plain GPU pod against the same SwarmUI install on the same network volume.
+# The entrypoint picks the mode, so this one image works as a RunPod serverless worker, a plain
+# GPU pod, or a Vast.ai Serverless worker, all against the same SwarmUI install on the same
+# network volume.
 CMD ["/entrypoint.sh"]
