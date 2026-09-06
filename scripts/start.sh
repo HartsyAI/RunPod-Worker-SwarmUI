@@ -26,62 +26,79 @@ fi
 
 echo "✓ Network volume detected"
 
-# ============================================================================== 
+# ==============================================================================
 # First-Time Installation
-# ============================================================================== 
+# ==============================================================================
 if [ ! -d "$SWARMUI_PATH" ]; then
     echo "=============================================================================="
     echo "First-Time Setup: Installing SwarmUI"
     echo "=============================================================================="
-    
-    cd "$VOLUME_PATH"
-    
-    # Download SwarmUI install script
-    echo "Downloading SwarmUI installer..."
-    wget -q https://github.com/mcmonkeyprojects/SwarmUI/releases/download/0.6.5-Beta/install-linux.sh -O install-linux.sh
-    chmod +x install-linux.sh
-    
-    # Run SwarmUI installer. install-linux.sh forwards its own arguments straight through to the
-    # launch-linux.sh it runs at the end (`./launch-linux.sh $@`), so passing our real host/port/
-    # launch_mode here is what actually launches correctly on a cold volume - without this, the
-    # installer's own first launch uses SwarmUI's bare defaults (host=localhost, launch_mode=install,
-    # which tries and harmlessly fails to open a system browser), binds to localhost only, and never
-    # returns control to the launch below since that first launch runs in the foreground forever.
-    echo "Running SwarmUI installer (this will clone and setup SwarmUI)..."
-    ./install-linux.sh --launch_mode none --host "$SWARMUI_HOST" --port "$SWARMUI_PORT"
-    
+
+    if [ -d /opt/SwarmUI-baked ]; then
+        # Fast path: the Dockerfile already git-cloned and dotnet-built SwarmUI once at image
+        # build time (see "Bake a pre-built SwarmUI into the image"), so this is a local file
+        # copy - seconds, no network, no build. This matters most for Vast.ai Serverless: its
+        # workergroups cannot attach a volume at all (confirmed empirically - there is no such
+        # option anywhere in the console's endpoint/workergroup creation flow, unlike RunPod's
+        # persistent network volume), so every single cold worker used to have to git clone and
+        # dotnet build SwarmUI from scratch over the network before it could even start - and
+        # Vast's autoscaler routinely replaces a not-yet-ready worker with a cheaper candidate
+        # before that multi-minute build finishes, so a serverless endpoint could churn
+        # indefinitely without ever reaching "ready". A local copy wins that race instead.
+        echo "Using the pre-built SwarmUI baked into this image..."
+        cp -a /opt/SwarmUI-baked "$SWARMUI_PATH"
+    else
+        # Defensive fallback for anyone running start.sh against an image that skipped the bake
+        # step. Cloning and building directly (rather than downloading and running the official
+        # install-linux.sh) is deliberate: that script's own last line launches SwarmUI itself
+        # and never returns control here, since that launch runs in the foreground for as long
+        # as the container lives - it would silently skip the ComfyUI install below, same as the
+        # bake step already does correctly by stopping short of any launch.
+        echo "No baked SwarmUI found in this image; cloning and building it now (this is slow - expect several minutes)..."
+        git clone --depth 1 https://github.com/mcmonkeyprojects/SwarmUI "$SWARMUI_PATH"
+        cd "$SWARMUI_PATH"
+        dotnet build src/SwarmUI.csproj --configuration Release -o ./src/bin/live_release
+        git rev-parse HEAD > src/bin/last_build
+        cd "$VOLUME_PATH"
+    fi
+
     if [ ! -d "$SWARMUI_PATH" ]; then
         echo "ERROR: SwarmUI installation failed - directory not created"
         exit 1
     fi
-    
+
     echo "✓ SwarmUI installed successfully"
-    
-    # Install ComfyUI Backend
-    echo "=============================================================================="
-    echo "Installing ComfyUI Backend"
-    echo "=============================================================================="
-    
-    cd "$SWARMUI_PATH"
-    
-    if [ -f "launchtools/comfy-install-linux.sh" ]; then
-        echo "Running ComfyUI installer..."
-        chmod +x launchtools/comfy-install-linux.sh
-        
-        # Run with 'nv' for NVIDIA GPUs
-        bash launchtools/comfy-install-linux.sh nv
-        
-        if [ $? -eq 0 ]; then
-            echo "✓ ComfyUI installed successfully"
+
+    # Install ComfyUI Backend, unless this is a Vast.ai Serverless worker - those configure
+    # their own backend (this extension's own providers, typically) and never want ComfyUI.
+    if [ "$SWARM_MODE" = "vast_serverless" ]; then
+        echo "Skipping ComfyUI auto-install (SWARM_MODE=vast_serverless configures its own backend)."
+    else
+        echo "=============================================================================="
+        echo "Installing ComfyUI Backend"
+        echo "=============================================================================="
+
+        cd "$SWARMUI_PATH"
+
+        if [ -f "launchtools/comfy-install-linux.sh" ]; then
+            echo "Running ComfyUI installer..."
+            chmod +x launchtools/comfy-install-linux.sh
+
+            # Run with 'nv' for NVIDIA GPUs
+            bash launchtools/comfy-install-linux.sh nv
+
+            if [ $? -eq 0 ]; then
+                echo "✓ ComfyUI installed successfully"
+            else
+                echo "ERROR: ComfyUI installation failed"
+                exit 1
+            fi
         else
-            echo "ERROR: ComfyUI installation failed"
+            echo "ERROR: ComfyUI installer not found at launchtools/comfy-install-linux.sh"
             exit 1
         fi
-    else
-        echo "ERROR: ComfyUI installer not found at launchtools/comfy-install-linux.sh"
-        exit 1
     fi
-    
+
 else
     echo "✓ SwarmUI already installed"
 fi
