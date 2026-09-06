@@ -18,13 +18,28 @@ echo "Volume Path: $VOLUME_PATH"
 echo "SwarmUI Path: $SWARMUI_PATH"
 echo "=============================================================================="
 
-# Check if network volume is mounted
+# Check if network volume is mounted.
+#
+# A Vast.ai Serverless worker never has one: workergroups cannot attach a volume at all (no such
+# option exists anywhere in that flow), so $VOLUME_PATH is just a directory on container disk and
+# nothing will ever create it for us. Treating that as a fatal error meant SwarmUI never started
+# on a real serverless worker - the PyWorker then correctly refused to report ready, and the
+# autoscaler recycled the worker, which looks exactly like the container being broken.
+#
+# Every other mode keeps failing loudly: for those a missing mount is genuine misconfiguration,
+# and quietly installing to ephemeral container disk would throw away the user's models on the
+# next restart instead of saying so.
 if [ ! -d "$VOLUME_PATH" ]; then
-    echo "ERROR: Network volume not mounted at $VOLUME_PATH"
-    exit 1
+    if [ "$SWARM_MODE" = "vast_serverless" ]; then
+        echo "No volume at $VOLUME_PATH (expected for Vast.ai Serverless); creating it on container disk."
+        mkdir -p "$VOLUME_PATH"
+    else
+        echo "ERROR: Network volume not mounted at $VOLUME_PATH"
+        exit 1
+    fi
+else
+    echo "✓ Network volume detected"
 fi
-
-echo "✓ Network volume detected"
 
 # ==============================================================================
 # First-Time Installation
