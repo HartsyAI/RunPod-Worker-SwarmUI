@@ -3,9 +3,10 @@
 # RunPod SDK (required for serverless handler)
 runpod>=1.6.2
 
-# Vast.ai SDK/CLI - the serverless PyWorker server used by vast_worker.py lives inside this
-# package (vastai.serverless.server); it also pulls its own aiohttp/psutil/pycryptodome deps.
-vastai>=1.6.0
+# Vast.ai's own SDK (vast_worker.py's dependency) is intentionally NOT here - it pins
+# cryptography==49.0.0 exactly, which fights the Debian-managed cryptography package this
+# image already has and breaks this install. It gets its own isolated venv instead; see the
+# Dockerfile's "Install Vast.ai Serverless Dependencies" step.
 
 # HTTP requests with retry capabilities
 requests>=2.31.0

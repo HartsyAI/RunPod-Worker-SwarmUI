@@ -85,9 +85,18 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages --ignore-insta
     python3 -m pip install --no-cache-dir --break-system-packages -r /requirements.txt && \
     rm /requirements.txt
 
-# ============================================================================== 
+# ==============================================================================
+# Install Vast.ai Serverless Dependencies
+# ==============================================================================
+# vastai pins cryptography==49.0.0 exactly, which conflicts with the Debian-managed
+# cryptography package already on this system image (pip can't uninstall it: no RECORD
+# file). A dedicated venv sidesteps that entirely rather than fighting PEP 668 twice.
+RUN python3 -m venv /opt/vastai-venv && \
+    /opt/vastai-venv/bin/pip install --no-cache-dir "vastai>=1.6.0"
+
+# ==============================================================================
 # Copy Application Files
-# ============================================================================== 
+# ==============================================================================
 COPY src/rp_handler.py /rp_handler.py
 COPY src/vast_worker.py /vast_worker.py
 COPY scripts/start.sh /start.sh
