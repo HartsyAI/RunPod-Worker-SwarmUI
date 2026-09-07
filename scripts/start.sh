@@ -60,8 +60,18 @@ if [ ! -d "$SWARMUI_PATH" ]; then
         # Vast's autoscaler routinely replaces a not-yet-ready worker with a cheaper candidate
         # before that multi-minute build finishes, so a serverless endpoint could churn
         # indefinitely without ever reaching "ready". A local copy wins that race instead.
-        echo "Using the pre-built SwarmUI baked into this image..."
-        cp -a /opt/SwarmUI-baked "$SWARMUI_PATH"
+        if [ "$SWARM_MODE" = "vast_serverless" ]; then
+            # Run the baked install where it was built, rather than copying it. The baked ComfyUI
+            # has a Python venv, and a venv records absolute paths - moving it to a different path
+            # can leave it launching against a directory that no longer exists. Nothing here is
+            # persistent anyway (a serverless worker has no volume), so a copy would only burn
+            # several GB and the seconds to write them on every single cold start.
+            echo "Using the pre-built SwarmUI baked into this image, in place..."
+            ln -s /opt/SwarmUI-baked "$SWARMUI_PATH"
+        else
+            echo "Using the pre-built SwarmUI baked into this image..."
+            cp -a /opt/SwarmUI-baked "$SWARMUI_PATH"
+        fi
     else
         # Defensive fallback for anyone running start.sh against an image that skipped the bake
         # step. Cloning and building directly (rather than downloading and running the official
@@ -84,10 +94,15 @@ if [ ! -d "$SWARMUI_PATH" ]; then
 
     echo "✓ SwarmUI installed successfully"
 
-    # Install ComfyUI Backend, unless this is a Vast.ai Serverless worker - those configure
-    # their own backend (this extension's own providers, typically) and never want ComfyUI.
-    if [ "$SWARM_MODE" = "vast_serverless" ]; then
-        echo "Skipping ComfyUI auto-install (SWARM_MODE=vast_serverless configures its own backend)."
+    # Install the ComfyUI backend, unless it is already baked into the image (Vast.ai Serverless).
+    #
+    # This used to skip the install for vast_serverless on the grounds that such a worker
+    # "configures its own backend". That was simply wrong: a SwarmUI with no backend starts
+    # normally and then cannot generate anything, so every Vast serverless worker came up useless.
+    # The image now bakes ComfyUI in and ships a Backends.fds registering it, which is the only
+    # workable answer when there is no volume to install onto once and reuse.
+    if [ -d "$SWARMUI_PATH/dlbackend/ComfyUI" ]; then
+        echo "✓ ComfyUI already present (baked into this image); skipping install."
     else
         echo "=============================================================================="
         echo "Installing ComfyUI Backend"

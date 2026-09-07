@@ -94,6 +94,41 @@ RUN git clone --depth 1 https://github.com/mcmonkeyprojects/SwarmUI /opt/SwarmUI
     git rev-parse HEAD > src/bin/last_build
 
 # ==============================================================================
+# Bake ComfyUI in as the baked SwarmUI's generation backend
+# ==============================================================================
+# SwarmUI with no backend starts fine but cannot generate anything, which is a dead worker for our
+# purposes. RunPod installs ComfyUI onto its persistent network volume once and reuses it; a Vast
+# serverless worker has no volume at all, so anything not in the image would have to be installed
+# again on every cold start - minutes of torch downloads per worker. Baking it is the only way that
+# path ever generates.
+#
+# This runs SwarmUI's own installer rather than a hand-rolled equivalent, so the ComfyUI revision,
+# torch index and requirements stay whatever upstream considers correct.
+RUN cd /opt/SwarmUI-baked && bash launchtools/comfy-install-linux.sh nv
+
+# Register that ComfyUI with the baked SwarmUI, because installing the files does not by itself add
+# a backend - normally the first-run wizard writes this, and nothing runs the wizard in a container.
+# StartScript is deliberately relative: it resolves against wherever SwarmUI ends up running from,
+# so the same file works whether that is this baked directory or a copy on a network volume.
+RUN mkdir -p /opt/SwarmUI-baked/Data && printf '%s\n' \
+    '0:' \
+    '	type: comfyui_selfstart' \
+    '	title: ComfyUI Self-Starting' \
+    '	enabled: true' \
+    '	settings:' \
+    '		StartScript: dlbackend/ComfyUI/main.py' \
+    '		ExtraArgs: ' \
+    '		DisableInternalArgs: false' \
+    '		AutoUpdate: false' \
+    '		UpdateManagedNodes: false' \
+    '		FrontendVersion: LatestSwarmValidated' \
+    '		EnablePreviews: true' \
+    '		GPU_ID: 0' \
+    '		OverQueue: 1' \
+    '		AutoRestart: true' \
+    > /opt/SwarmUI-baked/Data/Backends.fds
+
+# ==============================================================================
 # Install Handler Dependencies
 # ==============================================================================
 COPY requirements.txt /requirements.txt
