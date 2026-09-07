@@ -94,6 +94,50 @@ RUN git clone --depth 1 https://github.com/mcmonkeyprojects/SwarmUI /opt/SwarmUI
     git rev-parse HEAD > src/bin/last_build
 
 # ==============================================================================
+# Bake the HartsyInference backend in
+# ==============================================================================
+# SwarmUI with no backend starts fine and then cannot generate anything. RunPod installs its backend
+# onto the persistent network volume once and reuses it, but a Vast.ai Serverless workergroup cannot
+# attach a volume at all, so a serverless worker gets a bare container every time and anything not in
+# the image would be redone on every cold start.
+#
+# HartsyInference is pure C# in-process, so this costs an extension build and a NuGet package - no
+# Python, no venv, no multi-GB torch download, unlike wiring up ComfyUI for the same job.
+#
+# Built here rather than only cloned, because SwarmUI builds extensions on startup
+# (Core/ExtensionsManager.cs BuildExtension) and that build would otherwise land on the first cold
+# worker. That code skips building when its exact output file already exists, and names that file
+# after the extension's own git HEAD - so TargetName has to carry the same 8-char hash or the worker
+# rebuilds anyway and this buys nothing. The final `test` is what catches that drift, loudly, at
+# image build time instead of silently costing minutes per worker.
+RUN git clone --depth 1 https://github.com/HartsyAI/SwarmUI-HartsyInference-Backend \
+        /opt/SwarmUI-baked/src/Extensions/SwarmUI-HartsyInference && \
+    cd /opt/SwarmUI-baked && \
+    EXT_HASH="$(git -C src/Extensions/SwarmUI-HartsyInference rev-parse HEAD | cut -c1-8)" && \
+    DLL="SwarmExtensionSwarmUI-HartsyInference" && \
+    dotnet build src/Extensions/SwarmUI-HartsyInference/*.csproj -c Release \
+        -o "/opt/SwarmUI-baked/src/bin/extensions/$DLL/" \
+        -p:BaseIntermediateOutputPath="/opt/SwarmUI-baked/src/obj/extensions/$DLL/" \
+        -p:TargetName="$DLL-$EXT_HASH" && \
+    test -f "/opt/SwarmUI-baked/src/bin/extensions/$DLL/$DLL-$EXT_HASH.dll"
+
+# Register an actual backend, because building the extension only registers the backend *type* - it
+# does not create a configured backend, and nothing runs the first-run wizard in a container. Without
+# this a worker still comes up with an empty backend list and cannot generate.
+RUN mkdir -p /opt/SwarmUI-baked/Data && printf '%s\n' \
+    '0:' \
+    '	type: hartsyinference' \
+    '	title: HartsyInference' \
+    '	enabled: true' \
+    '	settings:' \
+    '		ComputeBackend: auto' \
+    '		GPU_ID: 0' \
+    '		LowVram: Auto' \
+    '		OverQueue: 1' \
+    '		Previews: true' \
+    > /opt/SwarmUI-baked/Data/Backends.fds
+
+# ==============================================================================
 # Install Handler Dependencies
 # ==============================================================================
 COPY requirements.txt /requirements.txt

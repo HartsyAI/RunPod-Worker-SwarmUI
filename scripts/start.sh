@@ -84,10 +84,19 @@ if [ ! -d "$SWARMUI_PATH" ]; then
 
     echo "✓ SwarmUI installed successfully"
 
-    # Install ComfyUI Backend, unless this is a Vast.ai Serverless worker - those configure
-    # their own backend (this extension's own providers, typically) and never want ComfyUI.
-    if [ "$SWARM_MODE" = "vast_serverless" ]; then
-        echo "Skipping ComfyUI auto-install (SWARM_MODE=vast_serverless configures its own backend)."
+    # Install the ComfyUI backend, unless a backend is already configured.
+    #
+    # The image bakes HartsyInference in and ships a Backends.fds enabling it, so a worker built from
+    # this image already has a working backend and must not spend minutes installing a second one it
+    # will never generate with.
+    #
+    # This keys off a backend actually being configured rather than off SWARM_MODE. The previous
+    # version skipped purely because the mode was vast_serverless, on the assumption such a worker
+    # "configures its own backend" - nothing did, so those workers came up with an empty backend list
+    # and could not generate at all. Keying off the real thing means an image built without the bake
+    # still installs ComfyUI and comes up usable.
+    if [ -s "$SWARMUI_PATH/Data/Backends.fds" ]; then
+        echo "✓ A backend is already configured (baked into this image); skipping ComfyUI install."
     else
         echo "=============================================================================="
         echo "Installing ComfyUI Backend"
