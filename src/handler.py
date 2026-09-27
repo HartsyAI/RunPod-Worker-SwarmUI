@@ -43,6 +43,13 @@ def public_url(pod_id: str, port: int) -> str:
     return f"https://{pod_id}-{port}.proxy.runpod.net"
 
 
+def _number(value: Any) -> Optional[float]:
+    """A numeric job input, or None if absent or not a number."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
 def _error(message: str, error_id: str) -> dict[str, Any]:
     return {"success": False, "error": message, "error_id": error_id}
 
@@ -66,6 +73,11 @@ async def handler(job: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
 async def _lease(job: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
     assert SUPERVISOR is not None
     config = SUPERVISOR.config
+    job_input = job.get("input") or {}
+    # The client's own idle and lease settings, clamped by the supervisor to safe bounds.
+    requested = (_number(job_input.get("idle_seconds")), _number(job_input.get("startup_grace_seconds")),
+                 _number(job_input.get("max_lease_seconds")))
+    idle, grace, cap = SUPERVISOR.lease_limits(*requested)
     try:
         lease = await SUPERVISOR.begin_lease()
     except RuntimeError as ex:
@@ -81,10 +93,11 @@ async def _lease(job: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
             "lease": lease.lease_number,
             "version": WORKER_VERSION,
             "protocol": PROTOCOL_VERSION,
-            "idle_seconds": config.idle_seconds,
-            "max_lease_seconds": config.max_seconds,
+            "idle_seconds": idle,
+            "startup_grace_seconds": grace,
+            "max_lease_seconds": cap,
         }
-        reason = await SUPERVISOR.wait_for_release()
+        reason = await SUPERVISOR.wait_for_release(*requested)
         yield {"success": True, "released": True, "reason": reason}
     finally:
         # Runs on normal release and when the client cancels the job. Shielded so a cancellation

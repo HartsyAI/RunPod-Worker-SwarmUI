@@ -42,7 +42,12 @@ class FakeSupervisor:
         self.began += 1
         return FakeLease(token="tok-" + "x" * 40, lease_number=self.began)
 
-    async def wait_for_release(self) -> str:
+    def lease_limits(self, idle=None, grace=None, cap=None):
+        self.requested = (idle, grace, cap)
+        return (idle or 120.0, grace or 600.0, cap or 3600.0)
+
+    async def wait_for_release(self, idle=None, grace=None, cap=None) -> str:
+        self.waited_with = (idle, grace, cap)
         await asyncio.sleep(self.release_after)
         return "idle"
 
@@ -121,3 +126,15 @@ def test_main_refuses_fixed_token_and_missing_pod_id(monkeypatch):
     monkeypatch.delenv("SWARMUI_WORKER_TOKEN")
     monkeypatch.setattr(handler_mod, "POD_ID", "")
     assert handler_mod.main() == 2
+
+
+def test_lease_passes_client_limits_to_the_supervisor(fake):
+    outputs = asyncio.run(collect({"input": {"action": "lease", "idle_seconds": 300, "startup_grace_seconds": 900,
+                                             "max_lease_seconds": 1800, "bogus": "x"}}))
+    assert fake.waited_with == (300.0, 900.0, 1800.0)
+    assert outputs[0]["idle_seconds"] == 300.0 and outputs[0]["max_lease_seconds"] == 1800.0
+
+
+def test_non_numeric_limits_are_ignored(fake):
+    asyncio.run(collect({"input": {"action": "lease", "idle_seconds": "300", "max_lease_seconds": True}}))
+    assert fake.waited_with == (None, None, None)
