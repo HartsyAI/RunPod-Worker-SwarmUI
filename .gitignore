@@ -1,3 +1,5 @@
-/.vs
-/tests/__pycache__
+__pycache__/
+*.pyc
+.pytest_cache/
 .env
+smoke-container.log

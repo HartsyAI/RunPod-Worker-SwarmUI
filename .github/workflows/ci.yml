@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The SwarmUI-Worker-Base release this worker builds on (image tag prefix and source ref for tests).
+  BASE_VERSION: ${{ vars.BASE_VERSION || 'edge' }}
+  BASE_REF: ${{ vars.BASE_REF || 'main' }}
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: HartsyAI/SwarmUI-Worker-Base
+          ref: ${{ env.BASE_REF }}
+          path: .base
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install "aiohttp>=3.10,<4" "pytest>=8" pyflakes
+      - run: python -m pyflakes src tests
+        env:
+          PYTHONPATH: .base/src
+      - run: python -m pytest -q tests
+        env:
+          PYTHONPATH: .base/src
+
+  image:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [comfyui, hartsyinference]
+    env:
+      LOCAL_TAG: swarmui-worker-runpod:ci-${{ matrix.backend }}
+      CAN_PUSH: ${{ secrets.DOCKERHUB_TOKEN != '' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    steps:
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost \
+                      /usr/local/share/powershell /usr/share/swift /opt/hostedtoolcache
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          tags: ${{ env.LOCAL_TAG }}
+          build-args: |
+            BASE_VERSION=${{ env.BASE_VERSION }}
+            BACKEND=${{ matrix.backend }}
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
+
+      - name: Smoke test (CPU)
+        run: bash tests/smoke/smoke.sh "$LOCAL_TAG"
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-${{ matrix.backend }}
+          path: smoke-container.log
+          if-no-files-found: ignore
+
+      - name: Image tags
+        id: meta
+        if: env.CAN_PUSH == 'true'
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: hartsy/swarmui-worker-runpod
+          flavor: |
+            latest=false
+            suffix=-${{ matrix.backend }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=pr
+            type=edge,branch=main
+
+      - name: Log in to Docker Hub
+        if: env.CAN_PUSH == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push
+        if: env.CAN_PUSH == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BASE_VERSION=${{ env.BASE_VERSION }}
+            BACKEND=${{ matrix.backend }}
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
