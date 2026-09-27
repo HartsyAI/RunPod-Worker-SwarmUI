@@ -18,25 +18,11 @@ echo "Volume Path: $VOLUME_PATH"
 echo "SwarmUI Path: $SWARMUI_PATH"
 echo "=============================================================================="
 
-# Check if network volume is mounted.
-#
-# A Vast.ai Serverless worker never has one: workergroups cannot attach a volume at all (no such
-# option exists anywhere in that flow), so $VOLUME_PATH is just a directory on container disk and
-# nothing will ever create it for us. Treating that as a fatal error meant SwarmUI never started
-# on a real serverless worker - the PyWorker then correctly refused to report ready, and the
-# autoscaler recycled the worker, which looks exactly like the container being broken.
-#
-# Every other mode keeps failing loudly: for those a missing mount is genuine misconfiguration,
-# and quietly installing to ephemeral container disk would throw away the user's models on the
-# next restart instead of saying so.
+# Check if network volume is mounted. A missing mount is misconfiguration: quietly installing to
+# ephemeral container disk would throw away the user's models on the next restart.
 if [ ! -d "$VOLUME_PATH" ]; then
-    if [ "$SWARM_MODE" = "vast_serverless" ]; then
-        echo "No volume at $VOLUME_PATH (expected for Vast.ai Serverless); creating it on container disk."
-        mkdir -p "$VOLUME_PATH"
-    else
-        echo "ERROR: Network volume not mounted at $VOLUME_PATH"
-        exit 1
-    fi
+    echo "ERROR: Network volume not mounted at $VOLUME_PATH"
+    exit 1
 else
     echo "✓ Network volume detected"
 fi
@@ -52,14 +38,7 @@ if [ ! -d "$SWARMUI_PATH" ]; then
     if [ -d /opt/SwarmUI-baked ]; then
         # Fast path: the Dockerfile already git-cloned and dotnet-built SwarmUI once at image
         # build time (see "Bake a pre-built SwarmUI into the image"), so this is a local file
-        # copy - seconds, no network, no build. This matters most for Vast.ai Serverless: its
-        # workergroups cannot attach a volume at all (confirmed empirically - there is no such
-        # option anywhere in the console's endpoint/workergroup creation flow, unlike RunPod's
-        # persistent network volume), so every single cold worker used to have to git clone and
-        # dotnet build SwarmUI from scratch over the network before it could even start - and
-        # Vast's autoscaler routinely replaces a not-yet-ready worker with a cheaper candidate
-        # before that multi-minute build finishes, so a serverless endpoint could churn
-        # indefinitely without ever reaching "ready". A local copy wins that race instead.
+        # copy - seconds, no network, no build, instead of a clone and build on every fresh volume.
         echo "Using the pre-built SwarmUI baked into this image..."
         cp -a /opt/SwarmUI-baked "$SWARMUI_PATH"
     else
@@ -84,34 +63,29 @@ if [ ! -d "$SWARMUI_PATH" ]; then
 
     echo "✓ SwarmUI installed successfully"
 
-    # Install ComfyUI Backend, unless this is a Vast.ai Serverless worker - those configure
-    # their own backend (this extension's own providers, typically) and never want ComfyUI.
-    if [ "$SWARM_MODE" = "vast_serverless" ]; then
-        echo "Skipping ComfyUI auto-install (SWARM_MODE=vast_serverless configures its own backend)."
-    else
-        echo "=============================================================================="
-        echo "Installing ComfyUI Backend"
-        echo "=============================================================================="
+    # Install the ComfyUI backend.
+    echo "=============================================================================="
+    echo "Installing ComfyUI Backend"
+    echo "=============================================================================="
 
-        cd "$SWARMUI_PATH"
+    cd "$SWARMUI_PATH"
 
-        if [ -f "launchtools/comfy-install-linux.sh" ]; then
-            echo "Running ComfyUI installer..."
-            chmod +x launchtools/comfy-install-linux.sh
+    if [ -f "launchtools/comfy-install-linux.sh" ]; then
+        echo "Running ComfyUI installer..."
+        chmod +x launchtools/comfy-install-linux.sh
 
-            # Run with 'nv' for NVIDIA GPUs
-            bash launchtools/comfy-install-linux.sh nv
+        # Run with 'nv' for NVIDIA GPUs
+        bash launchtools/comfy-install-linux.sh nv
 
-            if [ $? -eq 0 ]; then
-                echo "✓ ComfyUI installed successfully"
-            else
-                echo "ERROR: ComfyUI installation failed"
-                exit 1
-            fi
+        if [ $? -eq 0 ]; then
+            echo "✓ ComfyUI installed successfully"
         else
-            echo "ERROR: ComfyUI installer not found at launchtools/comfy-install-linux.sh"
+            echo "ERROR: ComfyUI installation failed"
             exit 1
         fi
+    else
+        echo "ERROR: ComfyUI installer not found at launchtools/comfy-install-linux.sh"
+        exit 1
     fi
 
 else

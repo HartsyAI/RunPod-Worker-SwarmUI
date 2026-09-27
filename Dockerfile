@@ -8,9 +8,6 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 ENV VOLUME_PATH=/runpod-volume
-# Port the Vast.ai PyWorker listens on in vast_serverless mode. Unused by the other two modes,
-# but exposed unconditionally since one image serves all three - see scripts/entrypoint.sh.
-ENV WORKER_PORT=8000
 ENV SWARMUI_PORT=7801
 ENV SWARMUI_HOST=0.0.0.0
 
@@ -80,12 +77,7 @@ RUN wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh && \
 # ==============================================================================
 # start.sh copies this to $SWARMUI_PATH on a fresh volume/container instead of git-cloning and
 # dotnet-building at container startup - a local file copy takes seconds; a live clone+build
-# takes minutes. That gap matters most for Vast.ai Serverless: its workergroups cannot attach a
-# volume at all (no such option exists anywhere in Vast's own console for a workergroup, unlike
-# RunPod's persistent network volume), so every cold worker used to pay the full clone+build
-# cost, and Vast's autoscaler routinely swaps out a not-yet-ready worker for a cheaper candidate
-# before that finishes - a serverless endpoint could churn indefinitely without ever reaching
-# "ready". This mirrors exactly what SwarmUI's own launch-linux.sh does on first run
+# takes minutes, paid again by every worker that starts on a fresh volume. This mirrors exactly what SwarmUI's own launch-linux.sh does on first run
 # (launchtools/linux-build-logic.sh: `dotnet build src/SwarmUI.csproj --configuration Release
 # -o ./src/bin/live_release`), just done once here instead of on every fresh container.
 RUN git clone --depth 1 https://github.com/mcmonkeyprojects/SwarmUI /opt/SwarmUI-baked && \
@@ -97,40 +89,34 @@ RUN git clone --depth 1 https://github.com/mcmonkeyprojects/SwarmUI /opt/SwarmUI
 # Install Handler Dependencies
 # ==============================================================================
 COPY requirements.txt /requirements.txt
-# One venv for every Python dependency this image needs (rp_handler.py's and vast_worker.py's
-# alike), not --break-system-packages against the system Python. That flag plus
+# One venv for every Python dependency this image needs, not --break-system-packages against the system Python. That flag plus
 # --ignore-installed used to be enough on this base image, but some apt package pulled in a
 # newer Debian-managed `cryptography` at some point after this Dockerfile was last verified,
 # and any pip install that now needs a different cryptography version (runpod's own dependency
-# chain does, and vastai pins one exactly) fails outright: pip can't uninstall a package apt
+# chain does) fails outright: pip can't uninstall a package apt
 # installed, since apt doesn't leave the RECORD file pip needs to safely replace it. A venv
 # sidesteps the system Python entirely rather than fighting PEP 668 and apt over the same
-# package - confirmed broken system-wide in CI even for requirements.txt alone, unrelated to
-# vastai specifically.
+# package - confirmed broken system-wide in CI even for requirements.txt alone.
 RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
     /opt/venv/bin/pip install --no-cache-dir -r /requirements.txt && \
-    /opt/venv/bin/pip install --no-cache-dir "vastai>=1.6.0" && \
     rm /requirements.txt
 
 # ==============================================================================
 # Copy Application Files
 # ==============================================================================
 COPY src/rp_handler.py /rp_handler.py
-COPY src/vast_worker.py /vast_worker.py
 COPY scripts/start.sh /start.sh
 COPY scripts/entrypoint.sh /entrypoint.sh
 
 # Fix line endings and permissions
-RUN dos2unix /start.sh /entrypoint.sh /rp_handler.py /vast_worker.py 2>/dev/null || true && \
+RUN dos2unix /start.sh /entrypoint.sh /rp_handler.py 2>/dev/null || true && \
     chmod +x /start.sh /entrypoint.sh
 
 # ==============================================================================
 # Expose Ports
 # ==============================================================================
-# SwarmUI itself, plus the Vast.ai PyWorker's port (only listened on in vast_serverless mode).
 EXPOSE ${SWARMUI_PORT}
-EXPOSE ${WORKER_PORT}
 
 # ============================================================================== 
 # Health Check
@@ -143,7 +129,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=3 \
 # ==============================================================================
 # Start SwarmUI, plus a job handler when running as any kind of serverless worker
 # ==============================================================================
-# The entrypoint picks the mode, so this one image works as a RunPod serverless worker, a plain
-# GPU pod, or a Vast.ai Serverless worker, all against the same SwarmUI install on the same
-# network volume.
+# The entrypoint picks the mode, so this one image works as a RunPod serverless worker or a plain
+# GPU pod, both against the same SwarmUI install on the same network volume.
 CMD ["/entrypoint.sh"]
