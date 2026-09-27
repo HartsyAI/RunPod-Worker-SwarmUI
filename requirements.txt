@@ -3,11 +3,6 @@
 # RunPod SDK (required for serverless handler)
 runpod>=1.6.2
 
-# Vast.ai's own SDK (vast_worker.py's dependency) is intentionally NOT listed here - it's
-# installed as its own pip command in the Dockerfile, after this file, into the same venv.
-# Keeping it separate means a change to its version doesn't require re-resolving everything
-# else in this file, and vice versa.
-
 # HTTP requests with retry capabilities
 requests>=2.31.0
 urllib3>=2.0.0
