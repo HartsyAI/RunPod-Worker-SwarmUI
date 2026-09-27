@@ -84,6 +84,7 @@ async def _lease(job: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
         # Worker concurrency is 1, so this only happens if RunPod ever hands a busy worker a second job.
         yield _error(str(ex), "lease_busy")
         return
+    ended = False
     try:
         yield {
             "success": True,
@@ -98,11 +99,15 @@ async def _lease(job: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
             "max_lease_seconds": cap,
         }
         reason = await SUPERVISOR.wait_for_release(*requested)
+        # Revoke before reporting the release: a generator pauses at each yield, so revoking after it
+        # would leave the token valid until RunPod resumes the generator, if it ever does.
+        await asyncio.shield(SUPERVISOR.end_lease())
+        ended = True
         yield {"success": True, "released": True, "reason": reason}
     finally:
-        # Runs on normal release and when the client cancels the job. Shielded so a cancellation
-        # cannot skip revoking the token.
-        await asyncio.shield(SUPERVISOR.end_lease())
+        # Cancellation and errors land here. Shielded so a cancellation cannot skip revoking the token.
+        if not ended:
+            await asyncio.shield(SUPERVISOR.end_lease())
         log.info("Lease %d for job %s finished", lease.lease_number, job.get("id", "?"))
 
 

@@ -138,3 +138,16 @@ def test_lease_passes_client_limits_to_the_supervisor(fake):
 def test_non_numeric_limits_are_ignored(fake):
     asyncio.run(collect({"input": {"action": "lease", "idle_seconds": "300", "max_lease_seconds": True}}))
     assert fake.waited_with == (None, None, None)
+
+
+def test_token_is_revoked_before_the_release_is_reported(fake):
+    async def body():
+        gen = handler_mod.handler({"input": {"action": "lease"}})
+        await gen.__anext__()
+        released = await gen.__anext__()
+        assert released["released"]
+        # The consumer has the release result without resuming the generator again: it must already be revoked.
+        assert fake.ended == 1
+        await gen.aclose()
+        assert fake.ended == 1
+    asyncio.run(body())
