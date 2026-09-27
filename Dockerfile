@@ -1,134 +1,29 @@
-# SwarmUI RunPod Serverless - Minimal Dockerfile
-# Uses SwarmUI's official install and launch scripts
-
-# Ubuntu 24.04 base: the sd.cpp prebuilt binaries require glibc 2.38 / GLIBCXX_3.4.32, which 22.04 cannot provide.
-FROM nvidia/cuda:12.6.2-cudnn-devel-ubuntu24.04
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
-ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
-ENV VOLUME_PATH=/runpod-volume
-ENV SWARMUI_PORT=7801
-ENV SWARMUI_HOST=0.0.0.0
-
-WORKDIR /
-
-# ============================================================================== 
-# Install System Dependencies
-# ============================================================================== 
-# deadsnakes PPA provides python3.11 on 24.04 (which defaults to python3.12).
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends software-properties-common gnupg && \
-    add-apt-repository -y ppa:deadsnakes/ppa && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        # Core utilities
-        wget \
-        curl \
-        ca-certificates \
-        git \
-        dos2unix \
-        # Python 3.11 (required by SwarmUI)
-        python3.11 \
-        python3.11-venv \
-        python3.11-dev \
-        python3-pip \
-        # Build tools
-        build-essential \
-        # Image processing
-        libglib2.0-0 \
-        libgl1 \
-        libgomp1 \
-        # Vulkan loader (required by the sd.cpp Vulkan backend binary)
-        libvulkan1 \
-    && \
-    # Cleanup
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Set Python 3.11 as default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 && \
-    update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
-
-# ==============================================================================
-# Install .NET 10 SDK
-# ==============================================================================
-# SwarmUI's own launcher treats .NET 8 as legacy and installs .NET 10, so shipping
-# 10 here keeps the image aligned with it. Without this, that launcher would pause
-# 15 seconds and download a second .NET into the network volume on a cold start.
+# syntax=docker/dockerfile:1.7
 #
-# SwarmUI targets net8.0 but builds with <RollForward>Major</RollForward>, so it
-# runs on the .NET 10 runtime; a separate .NET 8 runtime is not needed.
-#
-# Installed with Microsoft's official script rather than apt, because Ubuntu 24.04
-# packages .NET 8 natively and adding the Microsoft feed on noble conflicts with it.
-ENV DOTNET_ROOT=/usr/share/dotnet
-ENV PATH="${DOTNET_ROOT}:${DOTNET_ROOT}/tools:${PATH}"
-# The SDK install already brings Microsoft.AspNetCore.App, so it is not fetched separately.
-RUN wget https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh && \
-    chmod +x /tmp/dotnet-install.sh && \
-    /tmp/dotnet-install.sh --channel 10.0 --install-dir "$DOTNET_ROOT" && \
-    rm /tmp/dotnet-install.sh && \
-    ln -sf "$DOTNET_ROOT/dotnet" /usr/bin/dotnet && \
-    dotnet --list-sdks
+# Hartsy SwarmUI worker for RunPod (Serverless and Pods).
+# Everything provider-neutral (SwarmUI, the backend, the auth gateway, idle release) comes from
+# SwarmUI-Worker-Base; this image adds only RunPod's SDK and handler.
 
-# ==============================================================================
-# Bake a pre-built SwarmUI into the image
-# ==============================================================================
-# start.sh copies this to $SWARMUI_PATH on a fresh volume/container instead of git-cloning and
-# dotnet-building at container startup - a local file copy takes seconds; a live clone+build
-# takes minutes, paid again by every worker that starts on a fresh volume. This mirrors exactly what SwarmUI's own launch-linux.sh does on first run
-# (launchtools/linux-build-logic.sh: `dotnet build src/SwarmUI.csproj --configuration Release
-# -o ./src/bin/live_release`), just done once here instead of on every fresh container.
-RUN git clone --depth 1 https://github.com/mcmonkeyprojects/SwarmUI /opt/SwarmUI-baked && \
-    cd /opt/SwarmUI-baked && \
-    dotnet build src/SwarmUI.csproj --configuration Release -o ./src/bin/live_release && \
-    git rev-parse HEAD > src/bin/last_build
+ARG BASE_IMAGE=hartsy/swarmui-worker-base
+ARG BASE_VERSION=edge
+ARG BACKEND=comfyui
+FROM ${BASE_IMAGE}:${BASE_VERSION}-${BACKEND}
 
-# ==============================================================================
-# Install Handler Dependencies
-# ==============================================================================
-COPY requirements.txt /requirements.txt
-# One venv for every Python dependency this image needs, not --break-system-packages against the system Python. That flag plus
-# --ignore-installed used to be enough on this base image, but some apt package pulled in a
-# newer Debian-managed `cryptography` at some point after this Dockerfile was last verified,
-# and any pip install that now needs a different cryptography version (runpod's own dependency
-# chain does) fails outright: pip can't uninstall a package apt
-# installed, since apt doesn't leave the RECORD file pip needs to safely replace it. A venv
-# sidesteps the system Python entirely rather than fighting PEP 668 and apt over the same
-# package - confirmed broken system-wide in CI even for requirements.txt alone.
-RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -r /requirements.txt && \
-    rm /requirements.txt
+ARG VERSION=dev
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="swarmui-worker-runpod" \
+      org.opencontainers.image.description="Hartsy SwarmUI worker for RunPod Serverless and Pods" \
+      org.opencontainers.image.vendor="Hartsy" \
+      org.opencontainers.image.url="https://hartsy.ai" \
+      org.opencontainers.image.source="https://github.com/HartsyAI/RunPod-Worker-SwarmUI" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}"
 
-# ==============================================================================
-# Copy Application Files
-# ==============================================================================
-COPY src/rp_handler.py /rp_handler.py
-COPY scripts/start.sh /start.sh
-COPY scripts/entrypoint.sh /entrypoint.sh
+COPY --chown=swarm:swarm requirements.txt /opt/worker/requirements.txt
+RUN /opt/worker/venv/bin/pip install --no-cache-dir -r /opt/worker/requirements.txt
 
-# Fix line endings and permissions
-RUN dos2unix /start.sh /entrypoint.sh /rp_handler.py 2>/dev/null || true && \
-    chmod +x /start.sh /entrypoint.sh
+COPY --chown=swarm:swarm src/handler.py /opt/worker/handler.py
+COPY --chown=swarm:swarm scripts/entrypoint.sh /opt/worker/entrypoint.sh
 
-# ==============================================================================
-# Expose Ports
-# ==============================================================================
-EXPOSE ${SWARMUI_PORT}
-
-# ============================================================================== 
-# Health Check
-# ============================================================================== 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=1800s --retries=3 \
-    CMD curl -f -X POST http://localhost:${SWARMUI_PORT}/API/GetNewSession \
-        -H "Content-Type: application/json" \
-        -d '{}' || exit 1
-
-# ==============================================================================
-# Start SwarmUI, plus a job handler when running as any kind of serverless worker
-# ==============================================================================
-# The entrypoint picks the mode, so this one image works as a RunPod serverless worker or a plain
-# GPU pod, both against the same SwarmUI install on the same network volume.
-CMD ["/entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/opt/worker/entrypoint.sh"]

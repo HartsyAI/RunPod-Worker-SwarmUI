@@ -1,65 +1,8 @@
-# RunPod Ignore File
-# Exclude unnecessary files from Docker build context
-
-# Git
 .git
-.gitignore
-.gitattributes
-
-# GitHub
 .github/
-
-# Documentation (keep only README.md)
-*.md
-!README.md
 docs/
-
-# Development
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Testing
-tests/test_*.py
+tests/
 __pycache__/
 *.pyc
-*.pyo
-
-# Environment
-.env
-.env.local
-.env.*.local
-.env.example
-
-# Logs
-*.log
-logs/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Temporary
-tmp/
-temp/
-*.tmp
-
-# Output from testing
-output/
-
-# Large files that come from network volume
-Models/
-models/
-Output/
-SwarmUI/
-dlbackend/
-*.safetensors
-*.ckpt
-*.pt
-*.pth
-
-# Docker
-docker-compose*.yml
-.dockerignore
+*.md
+!README.md
