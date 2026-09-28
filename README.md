@@ -29,9 +29,10 @@ Pin a release version in production. `edge-<backend>` tracks `main`.
    | Setting | Value |
    |---|---|
    | Container disk | 30 GB (ComfyUI) or 15 GB (HartsyInference) |
+   | Expose HTTP ports | `7801` (under Container configuration). Without it RunPod's proxy cannot reach the worker. |
    | Network volume | the volume from step 1 |
    | GPU | 16 GB VRAM or more (24 GB for large models) |
-   | CUDA version | 12.8 or newer |
+   | CUDA version | 12.8 or newer for ComfyUI; **13.0 or newer for HartsyInference** (its GPU kernels need a CUDA 13 driver) |
    | Active workers | 0 (scales to zero) |
    | Max workers | the most workers you want running at once |
    | Execution timeout | above the lease limit, e.g. 4200 seconds for the default 3600-second lease |
