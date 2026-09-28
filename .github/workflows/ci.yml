@@ -70,6 +70,10 @@ jobs:
         run: |
           base="kalebbroo/swarmui-worker-base:${BASE_VERSION}-${{ matrix.backend }}"
           if [ "$BASE_VERSION" = "source" ]; then
+            if [ "${{ github.ref_type }}" = "tag" ]; then
+              echo "::error::Release tags must build on a published base, so the release is reproducible. Set the BASE_VERSION repo variable (e.g. 1.0.0)."
+              exit 1
+            fi
             git clone --depth 1 --branch "$BASE_REF" https://github.com/HartsyAI/SwarmUI-Worker-Base "$RUNNER_TEMP/base"
             docker build --build-arg BACKEND=${{ matrix.backend }} -t "$base" "$RUNNER_TEMP/base"
           else
