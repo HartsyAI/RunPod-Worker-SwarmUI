@@ -15,8 +15,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The SwarmUI-Worker-Base release this worker builds on (image tag prefix and source ref for tests).
-  BASE_VERSION: ${{ vars.BASE_VERSION || 'edge' }}
+  # The SwarmUI-Worker-Base release this worker builds on. 'source' (the default until base images are
+  # published) builds the base image from BASE_REF in the same job, so CI needs no registry access.
+  BASE_VERSION: ${{ vars.BASE_VERSION || 'source' }}
   BASE_REF: ${{ vars.BASE_REF || 'main' }}
 
 jobs:
@@ -43,7 +44,7 @@ jobs:
   image:
     needs: unit
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
@@ -52,6 +53,7 @@ jobs:
       LOCAL_TAG: swarmui-worker-runpod:ci-${{ matrix.backend }}
       CAN_PUSH: ${{ secrets.DOCKERHUB_TOKEN != '' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
+      # The ComfyUI base image is large (CUDA runtime plus torch); a hosted runner starts with ~14 GB free.
       - name: Free runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost \
@@ -60,19 +62,26 @@ jobs:
           df -h /
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Plain `docker build` on the runner's daemon throughout, so the Build step can use the base image
+      # this step produced without a registry in between.
+      - name: Base image
+        run: |
+          base="hartsy/swarmui-worker-base:${BASE_VERSION}-${{ matrix.backend }}"
+          if [ "$BASE_VERSION" = "source" ]; then
+            git clone --depth 1 --branch "$BASE_REF" https://github.com/HartsyAI/SwarmUI-Worker-Base "$RUNNER_TEMP/base"
+            docker build --build-arg BACKEND=${{ matrix.backend }} -t "$base" "$RUNNER_TEMP/base"
+          else
+            docker pull "$base"
+          fi
 
       - name: Build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          load: true
-          tags: ${{ env.LOCAL_TAG }}
-          build-args: |
-            BASE_VERSION=${{ env.BASE_VERSION }}
-            BACKEND=${{ matrix.backend }}
-            VERSION=${{ github.ref_name }}
-            REVISION=${{ github.sha }}
+        run: |
+          docker build -t "$LOCAL_TAG" \
+            --build-arg BASE_VERSION="$BASE_VERSION" \
+            --build-arg BACKEND=${{ matrix.backend }} \
+            --build-arg VERSION=${{ github.ref_name }} \
+            --build-arg REVISION=${{ github.sha }} .
 
       - name: Smoke test (CPU)
         run: bash tests/smoke/smoke.sh "$LOCAL_TAG"
@@ -107,16 +116,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Pushes the exact image the smoke test just passed, rather than rebuilding it.
       - name: Push
         if: env.CAN_PUSH == 'true'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            BASE_VERSION=${{ env.BASE_VERSION }}
-            BACKEND=${{ matrix.backend }}
-            VERSION=${{ github.ref_name }}
-            REVISION=${{ github.sha }}
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          for tag in $TAGS; do
+            docker tag "$LOCAL_TAG" "$tag"
+            docker push "$tag"
+          done

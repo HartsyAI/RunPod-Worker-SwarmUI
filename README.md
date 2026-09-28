@@ -85,7 +85,10 @@ Version 1 installed SwarmUI and ComfyUI onto the network volume, and ran SwarmUI
 
 ```bash
 PYTHONPATH=../SwarmUI-Worker-Base/src python -m pytest tests
-docker build --build-arg BACKEND=comfyui --build-arg BASE_VERSION=edge -t swarmui-worker-runpod:local .
+# Until base images are published, build the base locally first (CI does the same):
+git clone https://github.com/HartsyAI/SwarmUI-Worker-Base ../SwarmUI-Worker-Base
+docker build --build-arg BACKEND=comfyui -t hartsy/swarmui-worker-base:source-comfyui ../SwarmUI-Worker-Base
+docker build --build-arg BACKEND=comfyui --build-arg BASE_VERSION=source -t swarmui-worker-runpod:local .
 bash tests/smoke/smoke.sh swarmui-worker-runpod:local
 ```
 
