@@ -51,7 +51,7 @@ jobs:
         backend: [comfyui, hartsyinference]
     env:
       LOCAL_TAG: swarmui-worker-runpod:ci-${{ matrix.backend }}
-      # Publishing is opt-in: set the PUBLISH_IMAGES repo variable to 'true' once the Docker Hub secrets can push to hartsy/.
+      # Publishing is opt-in: set the PUBLISH_IMAGES repo variable to 'true' once the Docker Hub secrets can push to kalebbroo/.
       CAN_PUSH: ${{ vars.PUBLISH_IMAGES == 'true' && secrets.DOCKERHUB_TOKEN != '' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       # The ComfyUI base image is large (CUDA runtime plus torch); a hosted runner starts with ~14 GB free.
@@ -68,7 +68,7 @@ jobs:
       # this step produced without a registry in between.
       - name: Base image
         run: |
-          base="hartsy/swarmui-worker-base:${BASE_VERSION}-${{ matrix.backend }}"
+          base="kalebbroo/swarmui-worker-base:${BASE_VERSION}-${{ matrix.backend }}"
           if [ "$BASE_VERSION" = "source" ]; then
             git clone --depth 1 --branch "$BASE_REF" https://github.com/HartsyAI/SwarmUI-Worker-Base "$RUNNER_TEMP/base"
             docker build --build-arg BACKEND=${{ matrix.backend }} -t "$base" "$RUNNER_TEMP/base"
@@ -100,7 +100,7 @@ jobs:
         if: env.CAN_PUSH == 'true'
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
-          images: hartsy/swarmui-worker-runpod
+          images: kalebbroo/swarmui-worker-runpod
           flavor: |
             latest=false
             suffix=-${{ matrix.backend }}

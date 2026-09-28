@@ -6,7 +6,7 @@ It is built on [SwarmUI-Worker-Base](https://github.com/HartsyAI/SwarmUI-Worker-
 
 ## Images
 
-`hartsy/swarmui-worker-runpod:<version>-<backend>` on Docker Hub:
+`kalebbroo/swarmui-worker-runpod:<version>-<backend>` on Docker Hub:
 
 | Backend | Tag example | Notes |
 |---|---|---|
@@ -24,7 +24,7 @@ Pin a release version in production. `edge-<backend>` tracks `main`.
 ## Serverless setup
 
 1. **Network volume.** Create one in the data center you want, and put your models in `Models/` at its root: `Models/Stable-Diffusion`, `Models/Lora`, `Models/VAE`, and so on (SwarmUI's standard layout). Volumes from version 1 of this image (`SwarmUI/Models/`) are detected and used as they are.
-2. **Endpoint.** Create a **Queue**-type serverless endpoint from `hartsy/swarmui-worker-runpod:<version>-<backend>`:
+2. **Endpoint.** Create a **Queue**-type serverless endpoint from `kalebbroo/swarmui-worker-runpod:<version>-<backend>`:
 
    | Setting | Value |
    |---|---|
@@ -87,7 +87,7 @@ Version 1 installed SwarmUI and ComfyUI onto the network volume, and ran SwarmUI
 PYTHONPATH=../SwarmUI-Worker-Base/src python -m pytest tests
 # Until base images are published, build the base locally first (CI does the same):
 git clone https://github.com/HartsyAI/SwarmUI-Worker-Base ../SwarmUI-Worker-Base
-docker build --build-arg BACKEND=comfyui -t hartsy/swarmui-worker-base:source-comfyui ../SwarmUI-Worker-Base
+docker build --build-arg BACKEND=comfyui -t kalebbroo/swarmui-worker-base:source-comfyui ../SwarmUI-Worker-Base
 docker build --build-arg BACKEND=comfyui --build-arg BASE_VERSION=source -t swarmui-worker-runpod:local .
 bash tests/smoke/smoke.sh swarmui-worker-runpod:local
 ```

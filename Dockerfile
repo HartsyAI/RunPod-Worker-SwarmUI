@@ -4,7 +4,7 @@
 # Everything provider-neutral (SwarmUI, the backend, the auth gateway, idle release) comes from
 # SwarmUI-Worker-Base; this image adds only RunPod's SDK and handler.
 
-ARG BASE_IMAGE=hartsy/swarmui-worker-base
+ARG BASE_IMAGE=kalebbroo/swarmui-worker-base
 ARG BASE_VERSION=edge
 ARG BACKEND=comfyui
 FROM ${BASE_IMAGE}:${BASE_VERSION}-${BACKEND}
