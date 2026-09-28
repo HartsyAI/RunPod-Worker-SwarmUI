@@ -35,6 +35,7 @@ class FakeSupervisor:
         self.busy = busy
         self.began = 0
         self.ended = 0
+        self.end_delay = 0.0
 
     async def begin_lease(self) -> FakeLease:
         if self.busy:
@@ -52,6 +53,7 @@ class FakeSupervisor:
         return "idle"
 
     async def end_lease(self) -> None:
+        await asyncio.sleep(self.end_delay)
         self.ended += 1
 
 
@@ -97,6 +99,26 @@ def test_cancelled_lease_still_revokes_token(fake):
 
     asyncio.run(body())
     assert fake.ended == 1
+
+
+def test_repeated_cancellation_waits_for_revocation(fake):
+    fake.release_after = 3600
+    fake.end_delay = 0.2
+
+    async def body():
+        gen = handler_mod.handler({"input": {"action": "lease"}})
+        await gen.__anext__()
+        task = asyncio.ensure_future(gen.__anext__())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        await asyncio.sleep(0.05)
+        # Cancelled again while the token is being revoked.
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert fake.ended == 1
+
+    asyncio.run(body())
 
 
 def test_busy_worker_refuses_second_lease(fake):

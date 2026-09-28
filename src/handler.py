@@ -101,14 +101,32 @@ async def _lease(job: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
         reason = await SUPERVISOR.wait_for_release(*requested)
         # Revoke before reporting the release: a generator pauses at each yield, so revoking after it
         # would leave the token valid until RunPod resumes the generator, if it ever does.
-        await asyncio.shield(SUPERVISOR.end_lease())
         ended = True
+        await _revoke()
         yield {"success": True, "released": True, "reason": reason}
     finally:
-        # Cancellation and errors land here. Shielded so a cancellation cannot skip revoking the token.
+        # Cancellation and errors land here.
         if not ended:
-            await asyncio.shield(SUPERVISOR.end_lease())
+            await _revoke()
         log.info("Lease %d for job %s finished", lease.lease_number, job.get("id", "?"))
+
+
+async def _revoke() -> None:
+    """Ends the lease, finishing the revocation before any cancellation of this task goes through."""
+    assert SUPERVISOR is not None
+    task = asyncio.ensure_future(SUPERVISOR.end_lease())
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # A bare shield would let the cancellation through while the token is still valid.
+        while not task.done():
+            try:
+                await asyncio.wait({task})
+            except asyncio.CancelledError:
+                pass
+        if not task.cancelled() and task.exception() is not None:
+            log.error("Revoking the lease token failed: %s", task.exception())
+        raise
 
 
 def main() -> int:
