@@ -1,48 +1,44 @@
-#!/bin/bash
-# Chooses how this image runs, so one image serves both of RunPod's products against the same
-# SwarmUI install on the same network volume.
+#!/usr/bin/env bash
+# Starts the worker in the right mode for how RunPod launched this container.
 #
-#   serverless      - SwarmUI runs in the background and the RunPod job handler runs in the
-#                      foreground, because the handler is what RunPod supervises.
-#   pod             - SwarmUI runs in the foreground. There is no job handler in a pod: nothing
-#                      would call it, and when it exits the container stops.
+#   serverless  RunPod sets RUNPOD_ENDPOINT_ID only for serverless workers. The job handler is the
+#               foreground process, because that is what RunPod supervises; it starts SwarmUI itself.
+#   pod         Anything else. The base image's standalone supervisor runs SwarmUI behind the
+#               gateway with a fixed token (SWARMUI_WORKER_TOKEN, set when the pod is created).
 #
-# Getting the foreground process wrong is what breaks pods: if a job handler that nothing will
-# ever call is the foreground process, it exits immediately, the container dies with it, nothing
-# is left listening on the SwarmUI port, and the platform's proxy answers 404.
-#
-# Set SWARM_MODE to force a mode. Left on auto, RunPod serverless is detected by RUNPOD_ENDPOINT_ID, which RunPod sets
-# only for serverless workers; anything else defaults to plain pod/instance mode.
-
-set -e
+# Set SWARM_MODE=serverless or SWARM_MODE=pod to force a mode.
+set -euo pipefail
 
 MODE="${SWARM_MODE:-auto}"
-
 if [ "$MODE" = "auto" ]; then
-    if [ -n "$RUNPOD_ENDPOINT_ID" ]; then
-        MODE="serverless"
-    else
-        MODE="pod"
-    fi
+    if [ -n "${RUNPOD_ENDPOINT_ID:-}" ]; then MODE=serverless; else MODE=pod; fi
 fi
 
-echo "=============================================================================="
-echo "SwarmUI worker starting in '$MODE' mode"
-echo "  SWARM_MODE:          ${SWARM_MODE:-auto (detected)}"
-echo "  RUNPOD_ENDPOINT_ID:  ${RUNPOD_ENDPOINT_ID:-<unset>}"
-echo "  RUNPOD_POD_ID:       ${RUNPOD_POD_ID:-<unset>}"
-echo "=============================================================================="
+# Models live on the network volume. Serverless mounts it at /runpod-volume, pods usually at
+# /workspace. Version 1 of this image installed SwarmUI onto the volume, so its models are under
+# SwarmUI/Models; that layout is checked first so existing volumes keep working unchanged.
+if [ -z "${SWARMUI_MODEL_ROOT:-}" ]; then
+    for volume in "${VOLUME_PATH:-}" /runpod-volume /workspace; do
+        [ -n "$volume" ] || continue
+        for candidate in "$volume/SwarmUI/Models" "$volume/Models"; do
+            if [ -d "$candidate" ]; then
+                export SWARMUI_MODEL_ROOT="$candidate"
+                break 2
+            fi
+        done
+    done
+fi
+echo "SwarmUI worker (RunPod) starting in '$MODE' mode; models: ${SWARMUI_MODEL_ROOT:-<image default, no volume found>}"
 
 case "$MODE" in
     serverless)
-        /start.sh &
-        exec /opt/venv/bin/python -u /rp_handler.py
+        exec /opt/worker/venv/bin/python -u /opt/worker/handler.py
         ;;
     pod)
-        exec /start.sh
+        exec /opt/worker/venv/bin/python -u -m swarmui_worker
         ;;
     *)
-        echo "ERROR: SWARM_MODE must be 'serverless', 'pod', or 'auto' (got '$MODE')."
+        echo "SWARM_MODE must be 'serverless', 'pod', or 'auto' (got '$MODE')" >&2
         exit 1
         ;;
 esac

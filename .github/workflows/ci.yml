@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The SwarmUI-Worker-Base release this worker builds on. 'source' (the default until base images are
+  # published) builds the base image from BASE_REF in the same job, so CI needs no registry access.
+  BASE_VERSION: ${{ vars.BASE_VERSION || 'source' }}
+  BASE_REF: ${{ vars.BASE_REF || 'main' }}
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: HartsyAI/SwarmUI-Worker-Base
+          ref: ${{ env.BASE_REF }}
+          path: .base
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: pip install "aiohttp>=3.10,<4" "pytest>=8" pyflakes
+      - run: python -m pyflakes src tests
+        env:
+          PYTHONPATH: .base/src
+      - run: python -m pytest -q tests
+        env:
+          PYTHONPATH: .base/src
+
+  image:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [comfyui, hartsyinference]
+    env:
+      LOCAL_TAG: swarmui-worker-runpod:ci-${{ matrix.backend }}
+      # Publishing is opt-in: set the PUBLISH_IMAGES repo variable to 'true' once the Docker Hub secrets can push to kalebbroo/.
+      CAN_PUSH: ${{ vars.PUBLISH_IMAGES == 'true' && secrets.DOCKERHUB_TOKEN != '' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    steps:
+      # The ComfyUI base image is large (CUDA runtime plus torch); a hosted runner starts with ~14 GB free.
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost \
+                      /usr/local/share/powershell /usr/share/swift /opt/hostedtoolcache
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Plain `docker build` on the runner's daemon throughout, so the Build step can use the base image
+      # this step produced without a registry in between.
+      - name: Base image
+        run: |
+          base="kalebbroo/swarmui-worker-base:${BASE_VERSION}-${{ matrix.backend }}"
+          if [ "$BASE_VERSION" = "source" ]; then
+            if [ "${{ github.ref_type }}" = "tag" ]; then
+              echo "::error::Release tags must build on a published base, so the release is reproducible. Set the BASE_VERSION repo variable (e.g. 1.0.0)."
+              exit 1
+            fi
+            git clone --depth 1 --branch "$BASE_REF" https://github.com/HartsyAI/SwarmUI-Worker-Base "$RUNNER_TEMP/base"
+            docker build --build-arg BACKEND=${{ matrix.backend }} -t "$base" "$RUNNER_TEMP/base"
+          else
+            docker pull "$base"
+          fi
+
+      - name: Build
+        run: |
+          docker build -t "$LOCAL_TAG" \
+            --build-arg BASE_VERSION="$BASE_VERSION" \
+            --build-arg BACKEND=${{ matrix.backend }} \
+            --build-arg VERSION=${{ github.ref_name }} \
+            --build-arg REVISION=${{ github.sha }} .
+
+      - name: Smoke test (CPU)
+        run: bash tests/smoke/smoke.sh "$LOCAL_TAG"
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-${{ matrix.backend }}
+          path: smoke-container.log
+          if-no-files-found: ignore
+
+      - name: Image tags
+        id: meta
+        if: env.CAN_PUSH == 'true'
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: kalebbroo/swarmui-worker-runpod
+          flavor: |
+            latest=false
+            suffix=-${{ matrix.backend }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=pr
+            type=edge,branch=main
+
+      - name: Log in to Docker Hub
+        if: env.CAN_PUSH == 'true'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Pushes the exact image the smoke test just passed, rather than rebuilding it.
+      - name: Push
+        if: env.CAN_PUSH == 'true'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          for tag in $TAGS; do
+            docker tag "$LOCAL_TAG" "$tag"
+            docker push "$tag"
+          done

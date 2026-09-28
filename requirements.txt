@@ -1,11 +1,2 @@
-# SwarmUI RunPod Serverless - Minimal Dependencies
-
-# RunPod SDK (required for serverless handler)
-runpod>=1.6.2
-
-# HTTP requests with retry capabilities
-requests>=2.31.0
-urllib3>=2.0.0
-
-# Environment variable management (for local testing)
-python-dotenv>=0.21.0
+# RunPod's Python SDK, pinned: the handler depends on its async-generator streaming behavior.
+runpod==1.12.0
