@@ -51,7 +51,8 @@ jobs:
         backend: [comfyui, hartsyinference]
     env:
       LOCAL_TAG: swarmui-worker-runpod:ci-${{ matrix.backend }}
-      CAN_PUSH: ${{ secrets.DOCKERHUB_TOKEN != '' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
+      # Publishing is opt-in: set the PUBLISH_IMAGES repo variable to 'true' once the Docker Hub secrets can push to hartsy/.
+      CAN_PUSH: ${{ vars.PUBLISH_IMAGES == 'true' && secrets.DOCKERHUB_TOKEN != '' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       # The ComfyUI base image is large (CUDA runtime plus torch); a hosted runner starts with ~14 GB free.
       - name: Free runner disk space
