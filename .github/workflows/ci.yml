@@ -15,10 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The SwarmUI-Worker-Base release this worker builds on. 'source' (the default until base images are
-  # published) builds the base image from BASE_REF in the same job, so CI needs no registry access.
-  BASE_VERSION: ${{ vars.BASE_VERSION || 'source' }}
-  BASE_REF: ${{ vars.BASE_REF || 'main' }}
+  # Release tags build on the published base release in the BASE_VERSION repo variable (e.g. 1.0.0).
+  # Everything else builds the base from BASE_REF in the same job, so edge and PR images track base main.
+  BASE_VERSION: ${{ github.ref_type == 'tag' && vars.BASE_VERSION || 'source' }}
+  BASE_REF: ${{ github.ref_type == 'tag' && format('v{0}', vars.BASE_VERSION) || vars.BASE_REF || 'main' }}
 
 jobs:
   unit:
@@ -85,7 +85,7 @@ jobs:
           docker build -t "$LOCAL_TAG" \
             --build-arg BASE_VERSION="$BASE_VERSION" \
             --build-arg BACKEND=${{ matrix.backend }} \
-            --build-arg VERSION=${{ github.ref_name }} \
+            --build-arg VERSION="${GITHUB_REF_NAME#v}" \
             --build-arg REVISION=${{ github.sha }} .
 
       - name: Smoke test (CPU)
