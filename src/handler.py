@@ -2,7 +2,7 @@
 
 One job holds one worker. The `lease` action streams the worker's address and a fresh access token as
 its first output, then keeps running while SwarmUI is in use. It returns on its own once the worker has
-been idle for SWARMUI_IDLE_SECONDS, and RunPod then scales the worker down. Because a running lease
+been idle for the lease's idle window, and RunPod then scales the worker down. Because a running lease
 occupies its worker, a second lease queued while every worker is busy is real queue pressure, and
 RunPod's autoscaler adds a worker for it, up to the endpoint's Max Workers.
 
@@ -28,7 +28,7 @@ from swarmui_worker import logs
 from swarmui_worker.config import ConfigError, WorkerConfig
 from swarmui_worker.supervisor import BackgroundSupervisor
 
-WORKER_VERSION = "2.0.0"
+WORKER_VERSION = os.environ.get("WORKER_VERSION", "dev")
 PROTOCOL_VERSION = 2
 """Bumped whenever the lease output changes shape, so the client can refuse an incompatible worker."""
 
@@ -146,8 +146,11 @@ def main() -> int:
         log.error("RUNPOD_POD_ID is not set; this handler only runs on RunPod Serverless")
         return 2
     SUPERVISOR = BackgroundSupervisor(config)
-    SUPERVISOR.start()
-    runpod.serverless.start({"handler": handler, "return_aggregate_stream": True})
+    try:
+        SUPERVISOR.start()
+        runpod.serverless.start({"handler": handler, "return_aggregate_stream": True})
+    finally:
+        SUPERVISOR.stop()
     return 0
 
 

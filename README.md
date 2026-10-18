@@ -69,7 +69,7 @@ The base image's full list is in the [SwarmUI-Worker-Base README](https://github
 
 The Cloud Backends extension is the intended client. The protocol, for reference:
 
-- `{"input": {"action": "lease"}}` is an async job. Read `GET /v2/<endpoint>/stream/<job_id>`. The first output is `{"success": true, "public_url": ..., "token": ..., "worker_id": ..., "protocol": 2, "idle_seconds": ..., "max_lease_seconds": ...}`. The job completes with `{"released": true, "reason": ...}` when the worker goes idle. Cancelling the job ends the lease at once.
+- `{"input": {"action": "lease"}}` is an async job. Read `GET /v2/<endpoint>/stream/<job_id>`. The first output is `{"success": true, "public_url": ..., "token": ..., "worker_id": ..., "lease": ..., "version": ..., "protocol": 2, "idle_seconds": ..., "startup_grace_seconds": ..., "max_lease_seconds": ...}`. Optional inputs `idle_seconds`, `startup_grace_seconds` and `max_lease_seconds` set the lease's limits, within safe bounds. The job completes with `{"released": true, "reason": ...}` when the lease ends (`idle`, `startup_grace_expired`, `max_lifetime`, `swarmui_unresponsive` or `swarmui_exited`). Cancelling the job ends the lease at once.
 - `{"input": {"action": "health"}}` returns the worker version and protocol.
 
 Send requests to `public_url` with `Authorization: Bearer <token>`. HTTP responses through RunPod's proxy are limited to 100 seconds, so run generations over SwarmUI's WebSocket API (SwarmUI's own Swarm API backend does this).
@@ -85,9 +85,10 @@ Version 1 installed SwarmUI and ComfyUI onto the network volume, and ran SwarmUI
 ## Development
 
 ```bash
-PYTHONPATH=../SwarmUI-Worker-Base/src python -m pytest tests
-# Until base images are published, build the base locally first (CI does the same):
 git clone https://github.com/HartsyAI/SwarmUI-Worker-Base ../SwarmUI-Worker-Base
+PYTHONPATH=../SwarmUI-Worker-Base/src python -m pytest tests
+docker build --build-arg BACKEND=comfyui -t swarmui-worker-runpod:local .
+# To build on unreleased base changes instead (CI does this for edge and PR images):
 docker build --build-arg BACKEND=comfyui -t kalebbroo/swarmui-worker-base:source-comfyui ../SwarmUI-Worker-Base
 docker build --build-arg BACKEND=comfyui --build-arg BASE_VERSION=source -t swarmui-worker-runpod:local .
 bash tests/smoke/smoke.sh swarmui-worker-runpod:local

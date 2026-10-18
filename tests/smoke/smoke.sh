@@ -35,5 +35,6 @@ done
 [ "$code" = "200" ] || fail "pod-mode SwarmUI never answered through the gateway (HTTP $code)"
 code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:17802/API/GetNewSession)"
 [ "$code" = "401" ] || fail "pod mode accepted a request without the token (HTTP $code)"
+docker logs "$NAME" 2>&1 | grep -qF "$TOKEN" && fail "the worker token appears in the container log"
 
 echo "SMOKE PASS"

@@ -1,8 +1,0 @@
-.git
-.github/
-docs/
-tests/
-__pycache__/
-*.pyc
-*.md
-!README.md

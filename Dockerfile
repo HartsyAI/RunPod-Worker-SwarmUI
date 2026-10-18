@@ -5,7 +5,7 @@
 # SwarmUI-Worker-Base; this image adds only RunPod's SDK and handler.
 
 ARG BASE_IMAGE=kalebbroo/swarmui-worker-base
-ARG BASE_VERSION=edge
+ARG BASE_VERSION=1.0.0
 ARG BACKEND=comfyui
 FROM ${BASE_IMAGE}:${BASE_VERSION}-${BACKEND}
 
@@ -26,4 +26,8 @@ RUN /opt/worker/venv/bin/pip install --no-cache-dir -r /opt/worker/requirements.
 COPY --chown=swarm:swarm src/handler.py /opt/worker/handler.py
 COPY --chown=swarm:swarm scripts/entrypoint.sh /opt/worker/entrypoint.sh
 
-ENTRYPOINT ["/bin/bash", "/opt/worker/entrypoint.sh"]
+# The SDK prints at DEBUG by default, which logs every streamed output, lease tokens included.
+ENV RUNPOD_LOG_LEVEL=INFO \
+    WORKER_VERSION=${VERSION}
+
+ENTRYPOINT ["/usr/bin/tini", "--", "/bin/bash", "/opt/worker/entrypoint.sh"]
