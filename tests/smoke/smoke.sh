@@ -25,7 +25,9 @@ echo "== Pod mode gateway =="
 NAME="swarmui-rp-smoke-$$"
 trap 'docker logs "$NAME" >> "$LOG" 2>&1 || true; docker rm -f "$NAME" > /dev/null 2>&1 || true' EXIT
 TOKEN="$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 48)"
-docker run -d --name "$NAME" -p 127.0.0.1:17802:7801 -e SWARMUI_WORKER_TOKEN="$TOKEN" "$IMAGE" > /dev/null
+# base64url without padding, as the Cloud Backends extension sends it.
+CONFIG="$(printf '{"worker_token":"%s"}' "$TOKEN" | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+docker run -d --name "$NAME" -p 127.0.0.1:17802:7801 -e SWARMUI_WORKER_CONFIG="$CONFIG" "$IMAGE" > /dev/null
 for _ in $(seq 1 180); do
     code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{}' \
         http://127.0.0.1:17802/API/GetNewSession || true)"
@@ -35,6 +37,6 @@ done
 [ "$code" = "200" ] || fail "pod-mode SwarmUI never answered through the gateway (HTTP $code)"
 code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:17802/API/GetNewSession)"
 [ "$code" = "401" ] || fail "pod mode accepted a request without the token (HTTP $code)"
-docker logs "$NAME" 2>&1 | grep -qF "$TOKEN" && fail "the worker token appears in the container log"
+docker logs "$NAME" 2>&1 | grep -qF -e "$TOKEN" -e "$CONFIG" && fail "the worker token appears in the container log"
 
 echo "SMOKE PASS"

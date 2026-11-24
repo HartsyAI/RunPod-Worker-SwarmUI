@@ -140,7 +140,7 @@ def main() -> int:
     logs.setup(config.log_level, config.log_json)
     if config.token:
         # A fixed token would let a finished lease's holder reach the next lease on this worker.
-        log.error("SWARMUI_WORKER_TOKEN must not be set for serverless workers; each lease gets its own")
+        log.error("SWARMUI_WORKER_CONFIG must not have a worker_token on serverless workers; each lease gets its own")
         return 2
     if not POD_ID:
         log.error("RUNPOD_POD_ID is not set; this handler only runs on RunPod Serverless")

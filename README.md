@@ -48,7 +48,7 @@ Then generate as usual. The first generation starts a worker. The next ones go s
 
 The Cloud Backends extension creates, starts, and stops pods for you (RunPod GPU Pods section of the card). It sets the pod's token and volume automatically.
 
-To run one by hand: create a pod from the same image, attach your network volume, expose port **7801 as HTTP**, and set `SWARMUI_WORKER_TOKEN` to a random value of at least 32 characters. Connect SwarmUI to it with a **Swarm API** backend at `https://<pod-id>-7801.proxy.runpod.net`, with `AuthorizationHeader` set to `Bearer <token>`.
+To run one by hand: create a pod from the same image, attach your network volume, expose port **7801 as HTTP**, and set the environment variable `SWARMUI_WORKER_CONFIG` to `{"worker_token": "<token>"}`, where the token is a random value of at least 32 characters. Connect SwarmUI to it with a **Swarm API** backend at `https://<pod-id>-7801.proxy.runpod.net`, with `AuthorizationHeader` set to `Bearer <token>`.
 
 ## Configuration
 
@@ -60,7 +60,7 @@ These are environment variables on the endpoint or pod. The defaults suit most s
 | `SWARMUI_STARTUP_GRACE_SECONDS` | `600` | How long a new worker waits for its first generation. |
 | `SWARMUI_MAX_LEASE_SECONDS` | `3600` | Longest a single lease lasts. Keep the endpoint's execution timeout above it. |
 | `SWARMUI_MODEL_ROOT` | detected on the volume | Where the models are. |
-| `SWARMUI_WORKER_TOKEN` | *(none)* | **Pods only.** Serverless workers refuse to start with it set, because each lease must get its own token. |
+| `SWARMUI_WORKER_CONFIG` | *(none)* | The [worker config](https://github.com/HartsyAI/SwarmUI-Worker-Base#worker-config), one JSON object: `worker_token`, `public_port` and `volume_path`. Pods need a `worker_token`. Serverless workers refuse to start with one, because each lease must get its own token. Without `volume_path`, the volume is looked for at `/runpod-volume` and `/workspace`. |
 | `SWARM_MODE` | `auto` | `serverless` or `pod`. Detected from `RUNPOD_ENDPOINT_ID`. |
 
 The base image's full list is in the [SwarmUI-Worker-Base README](https://github.com/HartsyAI/SwarmUI-Worker-Base#configuration).

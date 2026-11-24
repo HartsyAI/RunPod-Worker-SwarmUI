@@ -142,10 +142,11 @@ def test_not_initialized(monkeypatch):
 
 
 def test_main_refuses_fixed_token_and_missing_pod_id(monkeypatch):
-    monkeypatch.setenv("SWARMUI_WORKER_TOKEN", "y" * 48)
+    monkeypatch.setenv("SWARMUI_WORKER_CONFIG", '{"worker_token": "%s"}' % ("y" * 48))
     monkeypatch.setattr(handler_mod, "POD_ID", "abc123")
     assert handler_mod.main() == 2
-    monkeypatch.delenv("SWARMUI_WORKER_TOKEN")
+    # A config without a token is fine on serverless, so this gets as far as the missing pod ID.
+    monkeypatch.setenv("SWARMUI_WORKER_CONFIG", '{"public_port": 7801}')
     monkeypatch.setattr(handler_mod, "POD_ID", "")
     assert handler_mod.main() == 2
 
