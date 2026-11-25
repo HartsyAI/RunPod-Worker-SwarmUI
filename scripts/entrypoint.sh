@@ -4,7 +4,7 @@
 #   serverless  RunPod sets RUNPOD_ENDPOINT_ID only for serverless workers. The job handler is the
 #               foreground process, because that is what RunPod supervises; it starts SwarmUI itself.
 #   pod         Anything else. The base image's standalone supervisor runs SwarmUI behind the
-#               gateway with a fixed token (SWARMUI_WORKER_TOKEN, set when the pod is created).
+#               gateway with a fixed token (in SWARMUI_WORKER_CONFIG, set when the pod is created).
 #
 # Set SWARM_MODE=serverless or SWARM_MODE=pod to force a mode.
 set -euo pipefail
@@ -18,7 +18,9 @@ fi
 # /workspace. Version 1 of this image installed SwarmUI onto the volume, so its models are under
 # SwarmUI/Models; that layout is checked first so existing volumes keep working unchanged.
 if [ -z "${SWARMUI_MODEL_ROOT:-}" ]; then
-    for volume in "${VOLUME_PATH:-}" /runpod-volume /workspace; do
+    # An invalid worker config stops the container here, with the reason.
+    configured="$(/opt/worker/venv/bin/python -m swarmui_worker.startup volume_path)"
+    for volume in "$configured" /runpod-volume /workspace; do
         [ -n "$volume" ] || continue
         for candidate in "$volume/SwarmUI/Models" "$volume/Models"; do
             if [ -d "$candidate" ]; then

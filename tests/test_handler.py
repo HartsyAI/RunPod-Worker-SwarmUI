@@ -141,13 +141,16 @@ def test_not_initialized(monkeypatch):
     assert out["error_id"] == "worker_not_ready"
 
 
-def test_main_refuses_fixed_token_and_missing_pod_id(monkeypatch):
-    monkeypatch.setenv("SWARMUI_WORKER_TOKEN", "y" * 48)
+def test_main_refuses_fixed_token_and_missing_pod_id(monkeypatch, capsys):
+    monkeypatch.setenv("SWARMUI_WORKER_CONFIG", '{"worker_token": "%s"}' % ("y" * 48))
     monkeypatch.setattr(handler_mod, "POD_ID", "abc123")
     assert handler_mod.main() == 2
-    monkeypatch.delenv("SWARMUI_WORKER_TOKEN")
+    assert "must not have a worker_token" in capsys.readouterr().err
+    # A config without a token is fine on serverless, so this gets as far as the missing pod ID.
+    monkeypatch.setenv("SWARMUI_WORKER_CONFIG", '{"public_port": 7801}')
     monkeypatch.setattr(handler_mod, "POD_ID", "")
     assert handler_mod.main() == 2
+    assert "RUNPOD_POD_ID is not set" in capsys.readouterr().err
 
 
 def test_lease_passes_client_limits_to_the_supervisor(fake):
